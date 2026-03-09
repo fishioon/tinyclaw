@@ -83,7 +83,11 @@ jobs:
 
       - name: Select kube context
         run: |
-          CTX="$(kubectl config get-contexts -o name | head -n1)"
+          if kubectl config get-contexts default >/dev/null 2>&1; then
+            CTX="default"
+          else
+            CTX="$(kubectl config get-contexts -o name | head -n1)"
+          fi
           if [ -z "${CTX}" ]; then
             echo "no context found in kubeconfig"
             exit 1
