@@ -67,6 +67,12 @@ jobs:
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
+      - name: Connect tailscale
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          tags: tag:ci
+
       - name: Setup kubeconfig
         run: |
           mkdir -p "$HOME/.kube"
@@ -74,6 +80,9 @@ jobs:
           ${{ secrets.KUBE_CONFIG }}
           EOF
           chmod 600 "$HOME/.kube/config"
+
+      - name: Verify cluster access
+        run: kubectl cluster-info
 
       - name: Ensure namespace claw
         run: kubectl apply -f k8s/namespace.yaml
