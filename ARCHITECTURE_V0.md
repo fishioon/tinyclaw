@@ -68,7 +68,6 @@ session_key = {chat_id_or_user_id}
 所有核心能力都围绕 `session_key`：
 - 路由（该消息发给哪个 agent）。
 - 隔离（Pod/命名空间/权限边界）。
-- 幂等（去重键作用域）。
 - 生命周期管理（休眠/唤醒/销毁）。
 
 ### 3.2 隔离等级（建议）
@@ -98,7 +97,7 @@ session_key = {chat_id_or_user_id}
 
 触发方式：
 - Ingress 每次拉到新消息后，先 `XADD stream:session:{session_key}`。
-- 再调用 `Session Runtime Ensure`（幂等）保证对应 sandbox 存在并可消费。
+- 再调用 `Session Runtime Ensure` 保证对应 sandbox 存在并可消费。
 - 不额外引入 `stream:dispatch`。
 
 字段最小集：
@@ -122,15 +121,19 @@ session_key = {chat_id_or_user_id}
 
 ### 4.2 交付语义
 - 采用 at-least-once（至少一次）交付。
-- 必须在 Agent 侧做幂等：`SETNX dedup:msg:{tenant_id}:{source_msg_id}`。
-- 回发也要幂等：`SETNX dedup:reply:{tenant_id}:{reply_id}`。
+- `XACK` 是队列消费完成的唯一提交点（commit point）。
 
 即使使用 Redis Stream，重复处理仍会发生，典型场景：
 1. consumer 处理完业务但尚未 `XACK` 时崩溃，消息会被重新领取。
 2. 网络抖动导致 `XACK` 结果不确定，worker 可能重试执行。
 3. `XPENDING/XCLAIM` 做故障转移时，原 worker 与新 worker 短时竞争同一条消息。
 
-结论：Redis Stream 解决了可恢复消费，不自动提供“仅一次”业务语义，幂等是必须项。
+结论：Redis Stream 解决了可恢复消费，不自动提供“仅一次”语义；v0 接受少量重复执行风险以换取实现简化。
+
+推荐处理顺序（v0）：
+1. `XREADGROUP` 获取消息。
+2. 执行业务并回发。
+3. 回发成功后 `XACK`。
 
 ### 4.3 顺序与并发
 - 同一个 `session_key` 严格串行消费。
@@ -171,7 +174,7 @@ cold -> starting -> active -> idle -> hibernated -> terminated
 - 将原始消息转为标准事件 schema。
 - 处理媒体下载（可选异步）。
 - 按 `session_key` 写入 `stream:session:{session_key}`。
-- 新消息到达后直接触发 `Session Runtime Ensure`（幂等）。
+- 新消息到达后直接触发 `Session Runtime Ensure`。
 
 ### 6.2 Session Runtime Manager（调度）
 - 根据 `session_key` 查询（并可短时缓存）SandboxClaim/Pod 状态，判断 agent 是否在线。
@@ -242,7 +245,7 @@ SLO（MVP）建议：
 
 ### Phase 1: 消息闭环
 - Ingress -> `stream:session:{session_key}` -> agent 自拉消费 -> Egress。
-- 接入幂等键和 trace_id。
+- 接入 trace_id 和基础重试链路。
 
 ### Phase 2: 会话隔离
 - 按 `session_key` 拉起独立 agent pod。
@@ -277,7 +280,7 @@ SLO（MVP）建议：
 
 该 v0 方案优先保证四件事：
 - 会话隔离可证明。
-- 消息语义可恢复（幂等、重试、DLQ）。
+- 消息语义可恢复（`XACK`、重试、DLQ）。
 - Agent 生命周期可控（休眠/唤醒/销毁）。
 - 企业数据源可读写且可审计。
 

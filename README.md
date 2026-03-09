@@ -1,4 +1,4 @@
-# oneclaw
+# tinyclaw
 
 ## 文档
 - [架构设计草案 v0](./ARCHITECTURE_V0.md)
@@ -11,7 +11,7 @@
 3. 不引入 `stream:dispatch`，由 Ingress 收到新消息后直接触发 `ensure(session_key)`。
 4. agent 在 sandbox 内自行 `XREADGROUP BLOCK` 持续拉取消息并串行消费。
 5. 不建设独立 `session registry` 表，暂不维护中心化 `last_seen_at`。
-6. 交付语义为 at-least-once，必须做入流/消费/回发三段幂等。
+6. 交付语义简化为：agent 消费成功并回发后 `XACK`，不引入额外幂等设计。
 7. 空闲策略先采用软休眠（阻塞等待），硬休眠（退出/缩容）后续按压测引入，自动销毁后置到 v1。
 
 ## 项目目标

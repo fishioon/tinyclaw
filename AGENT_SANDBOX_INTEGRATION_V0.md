@@ -1,10 +1,10 @@
-# OneClaw + Agent Sandbox Integration v0
+# TinyClaw + Agent Sandbox Integration v0
 
 ## 1. 目标
 
-把 `kubernetes-sigs/agent-sandbox` 作为 OneClaw 的执行层底座，实现：
+把 `kubernetes-sigs/agent-sandbox` 作为 TinyClaw 的执行层底座，实现：
 - 每个 `session_key` 对应独立可控 sandbox。
-- Ingress 收到新消息后写入对应 session stream，并幂等 `ensure` sandbox 可用。
+- Ingress 收到新消息后写入对应 session stream，并调用 `ensure` 保证 sandbox 可用。
 - Agent 在 sandbox 内自行持续拉取 Redis Stream，处理并回发。
 - 一段时间无新消息后，agent 进入休眠策略（软休眠或硬休眠）。
 
@@ -35,19 +35,19 @@
 建议命名规范（K8s）：
 
 ```text
-SandboxClaim.name = oneclaw-sbx-{hash(session_key)}
+SandboxClaim.name = tinyclaw-sbx-{hash(session_key)}
 labels:
-  oneclaw/session_key: "{session_key}"
-  oneclaw/tenant_id: "{tenant_id}"
-  oneclaw/chat_type: "{chat_type}"
+  tinyclaw/session_key: "{session_key}"
+  tinyclaw/tenant_id: "{tenant_id}"
+  tinyclaw/chat_type: "{chat_type}"
 annotations:
-  oneclaw/idle_after_sec: "300"
-  oneclaw/hibernate_after_sec: "1800"   # v0 可选
-  oneclaw/terminate_after_sec: "86400"  # 建议 v1 自动化
+  tinyclaw/idle_after_sec: "300"
+  tinyclaw/hibernate_after_sec: "1800"   # v0 可选
+  tinyclaw/terminate_after_sec: "86400"  # 建议 v1 自动化
 ```
 
 说明：
-- 使用确定性命名，`ensure` 可以幂等 create-or-get。
+- 使用确定性命名，`ensure` 采用 create-or-get。
 - 不单独维护 `session_runtime` 表。
 
 ## 4. 状态机与触发
@@ -82,13 +82,13 @@ cold -> starting -> active -> idle -> hibernated -> terminated
 
 ### 5.1 首条消息触发
 
-1. Ingress 拉到企业微信消息，按 `source_msg_id` 去重。
+1. Ingress 拉到企业微信消息并标准化。
 2. `XADD stream:session:{session_key}`。
 3. Ingress 同步调用 `POST /internal/session-runtime/ensure`。
 4. Orchestrator create-or-get `SandboxClaim`。
 5. sandbox 就绪后，agent 在容器内确保 consumer group 存在，再 `XREADGROUP BLOCK` 拉到消息并处理。
 6. agent 回发企业微信。
-7. 回发成功后 `XACK`，并打回发幂等标记。
+7. 回发成功后 `XACK`。
 
 ### 5.2 活跃会话
 
@@ -103,7 +103,7 @@ cold -> starting -> active -> idle -> hibernated -> terminated
 3. 超过 `hibernate_after` 可执行硬休眠（退出/缩容）。
 4. 新消息到来由 Ingress `ensure` 触发唤醒。
 
-## 6. API 草图（OneClaw 内部）
+## 6. API 草图（TinyClaw 内部）
 
 ### 6.1 Session Runtime API
 
@@ -126,8 +126,8 @@ Content-Type: application/json
   "session_key": "chat_123",
   "runtime_state": "starting",
   "sandbox_ref": {
-    "namespace": "oneclaw-runtime",
-    "name": "oneclaw-sbx-a1b2c3"
+    "namespace": "tinyclaw-runtime",
+    "name": "tinyclaw-sbx-a1b2c3"
   }
 }
 ```
@@ -140,16 +140,11 @@ POST /internal/session-runtime/{session_key}/terminate
 运行态查询：
 - 直接读 K8s `SandboxClaim` / Pod 状态。
 
-## 7. 幂等与一致性
+## 7. ACK 与重试
 
-必须保留三段幂等：
-
-1. 入流幂等：`dedup:ingress:{tenant_id}:{source_msg_id}`
-2. 消费幂等：`dedup:msg:{tenant_id}:{source_msg_id}`
-3. 回发幂等：`dedup:reply:{tenant_id}:{reply_id}`
-
-ACK 规则：
-- 仅在“业务处理成功 + 回发成功 + 回发幂等标记成功”后 `XACK`。
+ACK 规则（简化版）：
+- `XACK` 是队列完成的唯一提交点。
+- 仅在“业务处理成功 + 回发成功”后 `XACK`。
 - 任一环节失败不 `XACK`，由重试机制接管。
 
 ## 8. 失败处理
@@ -162,6 +157,8 @@ ACK 规则：
    - 记录失败消息，支持重试或人工重放。
 4. Egress 回发失败
    - 进入重试队列，超阈值进入 `dlq:reply`。
+5. 重复执行（可接受）
+   - 由于不引入额外幂等设计，极端故障下可能出现重复处理或重复回发。
 
 ## 9. 观测与告警
 
@@ -200,7 +197,7 @@ ACK 规则：
 1. 实现 `ensure` API（确定性命名 create-or-get）。
 2. 接入 Orchestrator（create/ready/sleep/terminate）。
 3. 在 agent 内实现 `XREADGROUP BLOCK` 消费循环。
-4. 接入幂等、回发、重试和告警。
+4. 接入回发、重试和告警。
 
 ## 12. 本轮确认约束
 

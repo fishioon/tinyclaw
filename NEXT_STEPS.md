@@ -5,7 +5,7 @@
 - Ingress 拉取消息并写入 `stream:session:{session_key}`
 - Ingress 触发 `ensure(session_key)` 拉起/唤醒 sandbox
 - agent 在 sandbox 内自拉 Redis Stream 并串行消费
-- 回发企业微信并完成幂等与 ACK
+- 回发企业微信并在成功后 `XACK`
 
 ## 第一阶段（Day 1-2）
 1. 定义统一事件 schema（message / reply / error）
@@ -22,7 +22,7 @@
 4. 接入 WeCom egress（真实回发）
 
 ## 第三阶段（Day 5-7）
-1. 三段幂等（ingress/msg/reply）
+1. 完善 ACK/重试/DLQ 链路
 2. 失败重试（指数退避）
 3. DLQ（`runtime_dlq` + `dlq:reply`）
 4. 空闲策略（先软休眠，硬休眠按压测可选）
@@ -31,9 +31,6 @@
 - `stream:session:{session_key}`：会话消息流
 - `cg:session:{session_key}`：会话 consumer group
 - `lock:ensure:{session_key}`：ensure 防抖（`SET NX EX 3`）
-- `dedup:ingress:{tenant_id}:{source_msg_id}`：入流幂等
-- `dedup:msg:{tenant_id}:{source_msg_id}`：消费幂等
-- `dedup:reply:{tenant_id}:{reply_id}`：回发幂等
 - `dlq:reply`：回发死信
 - `runtime_dlq`：sandbox 启动/运行死信
 
@@ -48,4 +45,4 @@
 1. 不出现 `stream:events` / `stream:dispatch` 旧方案
 2. 不出现独立 session registry 表与 `last_seen_at` 依赖
 3. 不出现“主服务 push turn 到 agent”的旧链路
-4. 所有幂等键都包含 `tenant_id`
+4. 交付语义保持简化：成功回发后 `XACK`
