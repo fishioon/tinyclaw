@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tinyclaw-relay
+  namespace: claw
+  labels:
+    app: tinyclaw-relay
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tinyclaw-relay
+  template:
+    metadata:
+      labels:
+        app: tinyclaw-relay
+    spec:
+      containers:
+        - name: relay
+          image: ghcr.io/fishioon/tinyclaw:latest
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: tinyclaw-env
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

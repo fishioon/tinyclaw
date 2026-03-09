@@ -1,9 +1,9 @@
 # tinyclaw
 
 ## 文档
-- [架构设计草案 v0](./ARCHITECTURE_V0.md)
-- [Agent Sandbox 集成设计 v0](./AGENT_SANDBOX_INTEGRATION_V0.md)
-- [下一步执行清单](./NEXT_STEPS.md)
+- [架构设计草案 v0](./docs/ARCHITECTURE_V0.md)
+- [Agent Sandbox 集成设计 v0](./docs/AGENT_SANDBOX_INTEGRATION_V0.md)
+- [下一步执行清单](./docs/NEXT_STEPS.md)
 
 ## 当前共识（2026-03-09）
 1. 会话键：`session_key = {chat_id_or_user_id}`，`tenant_id` 和 `chat_type` 作为独立字段保留。
@@ -20,3 +20,14 @@
 - agent 可自由执行代码（在安全边界内）并访问企业内部/外部工具。
 - 记忆与人格等结构化数据放在智能表格，文件上下文放在企业云盘。
 - 主服务负责消息拉取、会话分发、唤醒与治理；agent 负责消费、执行与回发。
+
+## K8s 部署
+- 命名空间固定为 `claw`。
+- 部署清单：
+  - `k8s/namespace.yaml`
+  - `k8s/deployment.yaml`
+  - `k8s/secret.example.yaml`
+- GitHub Actions 在 `main` 分支 push 后自动：
+  1. `go test ./...`
+  2. 构建并推送镜像到 `ghcr.io/<owner>/tinyclaw`
+  3. 部署到 `claw` 命名空间

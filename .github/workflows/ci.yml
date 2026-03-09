@@ -1,8 +1,9 @@
-name: CI
+name: CI-CD
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -25,6 +26,9 @@ jobs:
     name: Docker Build
     runs-on: ubuntu-latest
     needs: test
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,11 +36,78 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Login GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build Image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          push: false
-          tags: tinyclaw:ci-${{ github.sha }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/tinyclaw:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/tinyclaw:latest
           platforms: linux/amd64
+
+  deploy-claw:
+    name: Deploy To K8s Claw
+    runs-on: ubuntu-latest
+    needs: build-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          cat > "$HOME/.kube/config" <<'EOF'
+          ${{ secrets.KUBE_CONFIG }}
+          EOF
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Ensure namespace claw
+        run: kubectl apply -f k8s/namespace.yaml
+
+      - name: Apply runtime secret
+        env:
+          REDIS_ADDR: ${{ secrets.REDIS_ADDR }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          STREAM_PREFIX: ${{ secrets.STREAM_PREFIX }}
+          WECOM_CORP_ID: ${{ secrets.WECOM_CORP_ID }}
+          WECOM_CORP_SECRET: ${{ secrets.WECOM_CORP_SECRET }}
+          WECOM_RSA_PRIVATE_KEY: ${{ secrets.WECOM_RSA_PRIVATE_KEY }}
+          WECOM_SEQ_KEY: ${{ secrets.WECOM_SEQ_KEY }}
+        run: |
+          : "${REDIS_ADDR:=redis:6379}"
+          : "${STREAM_PREFIX:=stream:group}"
+          : "${WECOM_SEQ_KEY:=msg:seq}"
+          kubectl -n claw create secret generic tinyclaw-env \
+            --from-literal=REDIS_ADDR="${REDIS_ADDR}" \
+            --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD}" \
+            --from-literal=STREAM_PREFIX="${STREAM_PREFIX}" \
+            --from-literal=WECOM_CORP_ID="${WECOM_CORP_ID}" \
+            --from-literal=WECOM_CORP_SECRET="${WECOM_CORP_SECRET}" \
+            --from-literal=WECOM_RSA_PRIVATE_KEY="${WECOM_RSA_PRIVATE_KEY}" \
+            --from-literal=WECOM_SEQ_KEY="${WECOM_SEQ_KEY}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply deployment
+        run: kubectl apply -f k8s/deployment.yaml
+
+      - name: Update image
+        run: |
+          IMAGE_REF="ghcr.io/${{ github.repository_owner }}/tinyclaw:${{ github.sha }}"
+          kubectl -n claw set image deployment/tinyclaw-relay relay="${IMAGE_REF}"
+
+      - name: Wait rollout
+        run: kubectl -n claw rollout status deployment/tinyclaw-relay --timeout=300s
