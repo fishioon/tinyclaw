@@ -11,7 +11,7 @@ import (
 	"tinyclaw/wecom/finance"
 )
 
-type Relay struct {
+type Clawman struct {
 	cfg   Config
 	redis *redis.Client
 	sdk   *finance.SDK
@@ -29,7 +29,7 @@ type WeComMessage struct {
 	RawContent string   `json:"-"`
 }
 
-func NewRelay(cfg Config, rdb *redis.Client) (*Relay, error) {
+func NewClawman(cfg Config, rdb *redis.Client) (*Clawman, error) {
 	if cfg.WeComCorpID == "" || cfg.WeComCorpSecret == "" || cfg.WeComPrivateKey == "" {
 		return nil, fmt.Errorf("WECOM_CORP_ID/WECOM_CORP_SECRET/WECOM_RSA_PRIVATE_KEY are required")
 	}
@@ -46,7 +46,7 @@ func NewRelay(cfg Config, rdb *redis.Client) (*Relay, error) {
 		return nil, fmt.Errorf("init wecom sdk: %w", err)
 	}
 
-	r := &Relay{
+	r := &Clawman{
 		cfg:   cfg,
 		redis: rdb,
 		sdk:   sdk,
@@ -55,13 +55,13 @@ func NewRelay(cfg Config, rdb *redis.Client) (*Relay, error) {
 	return r, nil
 }
 
-func (r *Relay) Close() {
+func (r *Clawman) Close() {
 	if r.sdk != nil {
 		r.sdk.Free()
 	}
 }
 
-func (r *Relay) Run(ctx context.Context) error {
+func (r *Clawman) Run(ctx context.Context) error {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
@@ -83,7 +83,7 @@ func (r *Relay) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Relay) pullAndDispatch(ctx context.Context, seq, limit int64) (int64, error) {
+func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64, error) {
 	chatDataList, err := r.sdk.GetChatData(seq, limit)
 	if err != nil {
 		return seq, fmt.Errorf("sdk get chat data failed: seq=%d limit=%d err=%w", seq, limit, err)
@@ -109,6 +109,7 @@ func (r *Relay) pullAndDispatch(ctx context.Context, seq, limit int64) (int64, e
 			log.Printf("skip invalid message json: seq=%d msgid=%s err=%v", chatData.Seq, chatData.MsgID, err)
 			continue
 		}
+		msg.RawContent = string(raw)
 		if msg.From == "" || len(msg.ToList) == 0 {
 			log.Printf("skip invalid message without from/tolist: seq=%d msgid=%s", chatData.Seq, chatData.MsgID)
 			continue
@@ -132,8 +133,8 @@ func (r *Relay) pullAndDispatch(ctx context.Context, seq, limit int64) (int64, e
 
 func streamValues(msg WeComMessage) map[string]any {
 	return map[string]any{
-		"msgid":   msg.MsgID,
-		"raw": msg.RawContent,
+		"msgid": msg.MsgID,
+		"raw":   msg.RawContent,
 	}
 }
 

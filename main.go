@@ -30,17 +30,17 @@ func main() {
 	}
 	cancel()
 
-	relay, err := NewRelay(cfg, redisClient)
+	clawman, err := NewClawman(cfg, redisClient)
 	if err != nil {
-		log.Fatalf("init relay: %v", err)
+		log.Fatalf("init clawman: %v", err)
 	}
-	defer relay.Close()
+	defer clawman.Close()
 
 	runCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := relay.Run(runCtx); err != nil {
-		log.Fatalf("relay stopped with error: %v", err)
+	if err := clawman.Run(runCtx); err != nil {
+		log.Fatalf("clawman stopped with error: %v", err)
 	}
-	log.Printf("relay stopped")
+	log.Printf("clawman stopped")
 }

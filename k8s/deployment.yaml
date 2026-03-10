@@ -1,24 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: tinyclaw-relay
+  name: clawman
   namespace: claw
   labels:
-    app: tinyclaw-relay
+    app: clawman
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: tinyclaw-relay
+      app: clawman
   template:
     metadata:
       labels:
-        app: tinyclaw-relay
+        app: clawman
     spec:
       containers:
-        - name: relay
+        - name: clawman
           image: ghcr.io/fishioon/tinyclaw:latest
           imagePullPolicy: Always
           envFrom:
