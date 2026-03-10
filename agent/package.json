@@ -1,0 +1,13 @@
+{
+  "name": "tinyclaw-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types index.ts",
+    "test": "node --experimental-strip-types --test index.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "latest",
+    "ioredis": "^5.3.2"
+  }
+}
