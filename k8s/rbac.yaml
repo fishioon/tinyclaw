@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: clawman
+  namespace: claw
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: clawman-sandbox-manager
+  namespace: claw
+rules:
+  - apiGroups: ["agents.x-k8s.io"]
+    resources: ["sandboxes"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: clawman-sandbox-manager
+  namespace: claw
+subjects:
+  - kind: ServiceAccount
+    name: clawman
+    namespace: claw
+roleRef:
+  kind: Role
+  name: clawman-sandbox-manager
+  apiGroup: rbac.authorization.k8s.io

@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"k8s.io/client-go/rest"
+	sandboxclient "sigs.k8s.io/agent-sandbox/clients/k8s/clientset/versioned"
+	"tinyclaw/sandbox"
 )
 
 func main() {
@@ -30,7 +33,26 @@ func main() {
 	}
 	cancel()
 
-	clawman, err := NewClawman(cfg, redisClient)
+	var orch *sandbox.Orchestrator
+	if cfg.SandboxEnabled {
+		k8sCfg, err := rest.InClusterConfig()
+		if err != nil {
+			log.Fatalf("k8s in-cluster config: %v", err)
+		}
+		clientset, err := sandboxclient.NewForConfig(k8sCfg)
+		if err != nil {
+			log.Fatalf("k8s clientset: %v", err)
+		}
+		orch = sandbox.NewOrchestrator(clientset, redisClient, sandbox.Config{
+			Namespace:    cfg.SandboxNamespace,
+			Image:        cfg.SandboxImage,
+			RedisAddr:    cfg.RedisAddr,
+			StreamPrefix: cfg.StreamPrefix,
+		})
+		log.Printf("sandbox orchestrator enabled: namespace=%s image=%s", cfg.SandboxNamespace, cfg.SandboxImage)
+	}
+
+	clawman, err := NewClawman(cfg, redisClient, orch)
 	if err != nil {
 		log.Fatalf("init clawman: %v", err)
 	}

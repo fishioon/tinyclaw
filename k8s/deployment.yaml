@@ -17,6 +17,7 @@ spec:
       labels:
         app: clawman
     spec:
+      serviceAccountName: clawman
       containers:
         - name: clawman
           image: ghcr.io/fishioon/tinyclaw:latest

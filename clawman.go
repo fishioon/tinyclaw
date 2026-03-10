@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"tinyclaw/sandbox"
 	"tinyclaw/wecom"
 	"tinyclaw/wecom/finance"
 )
@@ -32,6 +33,7 @@ type Clawman struct {
 	redis *redis.Client
 	sdk   *finance.SDK
 	wecom *wecom.Client
+	orch  *sandbox.Orchestrator
 	seq   uint64
 }
 
@@ -46,7 +48,7 @@ type WeComMessage struct {
 	RawContent string   `json:"-"`
 }
 
-func NewClawman(cfg Config, rdb *redis.Client) (*Clawman, error) {
+func NewClawman(cfg Config, rdb *redis.Client, orch *sandbox.Orchestrator) (*Clawman, error) {
 	if cfg.WeComCorpID == "" || cfg.WeComCorpSecret == "" || cfg.WeComPrivateKey == "" {
 		return nil, fmt.Errorf("WECOM_CORP_ID/WECOM_CORP_SECRET/WECOM_RSA_PRIVATE_KEY are required")
 	}
@@ -73,6 +75,7 @@ func NewClawman(cfg Config, rdb *redis.Client) (*Clawman, error) {
 		redis: rdb,
 		sdk:   sdk,
 		wecom: wc,
+		orch:  orch,
 	}, nil
 }
 
@@ -140,7 +143,12 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			continue
 		}
 
-		stream := streamKey(r.cfg.StreamPrefix, &msg)
+		sessionKey := msg.RoomID
+		if msg.RoomID == "" {
+			sessionKey = msg.From
+		}
+
+		stream := r.cfg.StreamPrefix + ":" + sessionKey
 		if err := r.redis.XAdd(ctx, &redis.XAddArgs{
 			Stream: stream,
 			Values: streamValues(msg),
@@ -151,6 +159,11 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			return seq, fmt.Errorf("set seq in redis: %w", err)
 		}
 		seq = chatData.Seq
+
+		if r.orch != nil {
+			ct := chatTypeFromMsg(&msg)
+			r.orch.Ensure(ctx, sessionKey, r.cfg.WeComCorpID, ct)
+		}
 	}
 
 	return seq, nil
@@ -169,6 +182,19 @@ func streamKey(prefix string, msg *WeComMessage) string {
 	}
 	// 私聊直接用 from 作为 session key
 	return prefix + ":" + msg.From
+}
+
+// sessionKeyFromStream extracts the session key from a full stream key.
+func sessionKeyFromStream(prefix, stream string) string {
+	return strings.TrimPrefix(stream, prefix+":")
+}
+
+// chatTypeFromMsg returns "group" for group chats, "dm" for direct messages.
+func chatTypeFromMsg(msg *WeComMessage) string {
+	if msg.RoomID != "" {
+		return "group"
+	}
+	return "dm"
 }
 
 // Resolve resolves a WeCom ID to an Identity.
