@@ -33,9 +33,10 @@
   3. 部署到 `claw` 命名空间
 
 ## CI/CD 前置条件
-- `deploy-claw` job 通过 `tailscale/github-action@v3` 接入 tailnet 后再执行 `kubectl`。
+- `deploy-claw` job 通过 `tailscale/github-action@v4`（OAuth client）接入 tailnet 后再执行 `kubectl`。
 - 需要在 GitHub 仓库 secrets 中配置：
-  - `TS_AUTHKEY`：Tailscale auth key（建议绑定最小权限 tag，如 `tag:ci`）。
+  - `TS_OAUTH_CLIENT_ID`：Tailscale OAuth client ID（建议最小权限并限制 tag，如 `tag:ci`）。
+  - `TS_OAUTH_SECRET`：Tailscale OAuth client secret。
   - `KUBE_CONFIG`：Kubernetes kubeconfig 内容（apiserver 必须是 tailnet 可达地址）。
   - `REDIS_ADDR`
   - `REDIS_PASSWORD`
