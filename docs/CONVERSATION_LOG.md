@@ -72,3 +72,20 @@ agent启动后就去从redis队列中拉取对应的消息，开始消费。
 - 已创建目录：`/Users/fish/git/tinyclaw`
 - 本文件即为启动会记录。
 
+---
+
+## 5. CI/CD 与部署校准（2026-03-10）
+
+### 变更结论
+1. CI workflow 从单文件 `ci.yml` 拆分为：
+   - `.github/workflows/build.yml`
+   - `.github/workflows/deploy.yml`
+2. `Deploy` 通过 `workflow_run` 监听 `Build` 成功（`main` 分支）触发，保留 `workflow_dispatch` 手动触发。
+3. K8s Deployment 资源名统一为 `clawman`，部署步骤使用：
+   - `kubectl -n claw set image deployment/clawman clawman=...`
+   - `kubectl -n claw rollout status deployment/clawman`
+4. 移除节点排除规则（不再排除 `cvm-sz2`）。
+5. Tailscale 鉴权从 `TS_AUTHKEY` 迁移为 OAuth client：
+   - `TS_OAUTH_CLIENT_ID`
+   - `TS_OAUTH_SECRET`
+6. Deploy 中 kube context 采用 `azure/k8s-set-context@v4`，要求 `KUBE_CONFIG` 中存在 `default` context。

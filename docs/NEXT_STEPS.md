@@ -46,3 +46,5 @@
 2. 不出现独立 session registry 表与 `last_seen_at` 依赖
 3. 不出现“主服务 push turn 到 agent”的旧链路
 4. 交付语义保持简化：成功回发后 `XACK`
+5. CI workflow 不回退到单文件 `ci.yml`；保持 `build.yml` 与 `deploy.yml` 分离
+6. Tailscale 鉴权不回退到 `TS_AUTHKEY`；保持 `TS_OAUTH_CLIENT_ID` + `TS_OAUTH_SECRET`

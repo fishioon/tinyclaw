@@ -27,24 +27,33 @@
   - `k8s/namespace.yaml`
   - `k8s/deployment.yaml`
   - `k8s/secret.example.yaml`
-- GitHub Actions 在 `main` 分支 push 后自动：
-  1. `go test ./...`
-  2. 构建并推送镜像到 `ghcr.io/<owner>/tinyclaw`
-  3. 部署到 `claw` 命名空间
+- K8s Deployment 资源名固定为 `clawman`（见 `k8s/deployment.yaml`）。
+- GitHub Actions 已拆分为两个 workflow：
+  1. `Build`（`.github/workflows/build.yml`）：
+     - 触发：`push` / `pull_request` / `workflow_dispatch`
+     - 执行：`go test ./...` + Docker build
+     - 仅在 `main` 的 `push` 或手动触发时推送镜像到 `ghcr.io/<owner>/tinyclaw`
+  2. `Deploy`（`.github/workflows/deploy.yml`）：
+     - 触发：`Build` 在 `main` 成功后自动触发（`workflow_run`），或手动 `workflow_dispatch`
+     - 执行：部署到 `claw` 命名空间，并更新 `deployment/clawman`
+     - 手动触发可选 `image_tag`，为空时默认使用触发提交 SHA
 
 ## CI/CD 前置条件
 - `deploy-claw` job 通过 `tailscale/github-action@v4`（OAuth client）接入 tailnet 后再执行 `kubectl`。
+- Tailscale OAuth client 需要：
+  - 可写 `auth_keys` scope
+  - 至少包含 `tag:ci`（与 workflow 中 `tags: tag:ci` 对齐）
 - 需要在 GitHub 仓库 secrets 中配置：
   - `TS_OAUTH_CLIENT_ID`：Tailscale OAuth client ID（建议最小权限并限制 tag，如 `tag:ci`）。
   - `TS_OAUTH_SECRET`：Tailscale OAuth client secret。
-  - `KUBE_CONFIG`：Kubernetes kubeconfig 内容（apiserver 必须是 tailnet 可达地址）。
-  - `REDIS_ADDR`
-  - `REDIS_PASSWORD`
-  - `STREAM_PREFIX`
-  - `WECOM_CORP_ID`
-  - `WECOM_CORP_SECRET`
-  - `WECOM_RSA_PRIVATE_KEY`
-  - `WECOM_SEQ_KEY`
+  - `KUBE_CONFIG`：Kubernetes kubeconfig 内容（apiserver 必须是 tailnet 可达地址，且包含 `default` context）。
+  - `WECOM_CORP_ID`（必需）
+  - `WECOM_CORP_SECRET`（必需）
+  - `WECOM_RSA_PRIVATE_KEY`（必需）
+  - `REDIS_ADDR`（可选，默认 `redis:6379`）
+  - `REDIS_PASSWORD`（可选）
+  - `STREAM_PREFIX`（可选，默认 `stream:group`）
+  - `WECOM_SEQ_KEY`（可选，默认 `msg:seq`）
 - 目前仓库内默认值：
   - `REDIS_ADDR=redis:6379`
   - `STREAM_PREFIX=stream:group`
