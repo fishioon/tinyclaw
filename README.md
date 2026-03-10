@@ -4,6 +4,7 @@
 - [架构设计草案 v0](./docs/ARCHITECTURE_V0.md)
 - [Agent Sandbox 集成设计 v0](./docs/AGENT_SANDBOX_INTEGRATION_V0.md)
 - [下一步执行清单](./docs/NEXT_STEPS.md)
+- [核心贡献者准备手册](./docs/CORE_CONTRIBUTOR_PLAYBOOK.md)
 
 ## 当前共识（2026-03-09）
 1. 会话键：`session_key = {chat_id_or_user_id}`，`tenant_id` 和 `chat_type` 作为独立字段保留。
@@ -52,9 +53,9 @@
   - `WECOM_RSA_PRIVATE_KEY`（必需）
   - `REDIS_ADDR`（可选，默认 `redis:6379`）
   - `REDIS_PASSWORD`（可选）
-  - `STREAM_PREFIX`（可选，默认 `stream:group`）
+  - `STREAM_PREFIX`（可选，默认 `stream:session`）
   - `WECOM_SEQ_KEY`（可选，默认 `msg:seq`）
 - 目前仓库内默认值：
   - `REDIS_ADDR=redis:6379`
-  - `STREAM_PREFIX=stream:group`
+  - `STREAM_PREFIX=stream:session`
   - `WECOM_SEQ_KEY=msg:seq`

@@ -62,7 +62,7 @@ jobs:
           WECOM_SEQ_KEY: ${{ secrets.WECOM_SEQ_KEY }}
         run: |
           : "${REDIS_ADDR:=redis:6379}"
-          : "${STREAM_PREFIX:=stream:group}"
+          : "${STREAM_PREFIX:=stream:session}"
           : "${WECOM_SEQ_KEY:=msg:seq}"
           kubectl -n claw create secret generic tinyclaw-env \
             --from-literal=REDIS_ADDR="${REDIS_ADDR}" \

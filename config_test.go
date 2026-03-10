@@ -1,0 +1,87 @@
+package main
+
+import "testing"
+
+func TestEnvOrDefault(t *testing.T) {
+	t.Setenv("TEST_ENV_OR_DEFAULT", "value")
+	if got := envOrDefault("TEST_ENV_OR_DEFAULT", "fallback"); got != "value" {
+		t.Fatalf("envOrDefault() = %q, want %q", got, "value")
+	}
+
+	if got := envOrDefault("TEST_ENV_OR_DEFAULT_MISSING", "fallback"); got != "fallback" {
+		t.Fatalf("envOrDefault() = %q, want %q", got, "fallback")
+	}
+}
+
+func TestLoadConfigDefaults(t *testing.T) {
+	t.Setenv("REDIS_ADDR", "")
+	t.Setenv("REDIS_PASSWORD", "")
+	t.Setenv("REDIS_DB", "")
+	t.Setenv("STREAM_PREFIX", "")
+	t.Setenv("WECOM_CORP_ID", "")
+	t.Setenv("WECOM_CORP_SECRET", "")
+	t.Setenv("WECOM_RSA_PRIVATE_KEY", "")
+	t.Setenv("WECOM_SEQ_KEY", "")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if cfg.RedisAddr != defaultRedisAddr {
+		t.Fatalf("RedisAddr = %q, want %q", cfg.RedisAddr, defaultRedisAddr)
+	}
+	if cfg.RedisDB != 0 {
+		t.Fatalf("RedisDB = %d, want 0", cfg.RedisDB)
+	}
+	if cfg.StreamPrefix != defaultStreamPrefix {
+		t.Fatalf("StreamPrefix = %q, want %q", cfg.StreamPrefix, defaultStreamPrefix)
+	}
+	if cfg.WeComSeqKey != defaultWeComSeqKey {
+		t.Fatalf("WeComSeqKey = %q, want %q", cfg.WeComSeqKey, defaultWeComSeqKey)
+	}
+	if cfg.RedisPassword != "" {
+		t.Fatalf("RedisPassword = %q, want empty", cfg.RedisPassword)
+	}
+}
+
+func TestLoadConfigReadsEnv(t *testing.T) {
+	t.Setenv("REDIS_ADDR", "10.0.0.9:6379")
+	t.Setenv("REDIS_PASSWORD", "secret")
+	t.Setenv("REDIS_DB", "3")
+	t.Setenv("STREAM_PREFIX", "stream:session")
+	t.Setenv("WECOM_CORP_ID", "corp")
+	t.Setenv("WECOM_CORP_SECRET", "corp-secret")
+	t.Setenv("WECOM_RSA_PRIVATE_KEY", "private-key")
+	t.Setenv("WECOM_SEQ_KEY", "msg:seq:test")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if cfg.RedisAddr != "10.0.0.9:6379" {
+		t.Fatalf("RedisAddr = %q, want %q", cfg.RedisAddr, "10.0.0.9:6379")
+	}
+	if cfg.RedisPassword != "secret" {
+		t.Fatalf("RedisPassword = %q, want %q", cfg.RedisPassword, "secret")
+	}
+	if cfg.RedisDB != 3 {
+		t.Fatalf("RedisDB = %d, want 3", cfg.RedisDB)
+	}
+	if cfg.StreamPrefix != "stream:session" {
+		t.Fatalf("StreamPrefix = %q, want %q", cfg.StreamPrefix, "stream:session")
+	}
+	if cfg.WeComCorpID != "corp" {
+		t.Fatalf("WeComCorpID = %q, want %q", cfg.WeComCorpID, "corp")
+	}
+	if cfg.WeComCorpSecret != "corp-secret" {
+		t.Fatalf("WeComCorpSecret = %q, want %q", cfg.WeComCorpSecret, "corp-secret")
+	}
+	if cfg.WeComPrivateKey != "private-key" {
+		t.Fatalf("WeComPrivateKey = %q, want %q", cfg.WeComPrivateKey, "private-key")
+	}
+	if cfg.WeComSeqKey != "msg:seq:test" {
+		t.Fatalf("WeComSeqKey = %q, want %q", cfg.WeComSeqKey, "msg:seq:test")
+	}
+}

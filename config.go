@@ -6,9 +6,9 @@ import (
 )
 
 const (
-	defaultRedisAddr       = "127.0.0.1:6379"
-	defaultStreamPrefix    = "stream:group"
-	defaultWeComSeqKey     = "msg:seq"
+	defaultRedisAddr    = "127.0.0.1:6379"
+	defaultStreamPrefix = "stream:session"
+	defaultWeComSeqKey  = "msg:seq"
 )
 
 type Config struct {
@@ -17,10 +17,10 @@ type Config struct {
 	RedisDB       int
 	StreamPrefix  string
 
-	WeComCorpID      string
-	WeComCorpSecret  string
-	WeComPrivateKey  string
-	WeComSeqKey      string
+	WeComCorpID     string
+	WeComCorpSecret string
+	WeComPrivateKey string
+	WeComSeqKey     string
 }
 
 func LoadConfig() (Config, error) {

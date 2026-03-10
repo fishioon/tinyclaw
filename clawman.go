@@ -110,15 +110,21 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			continue
 		}
 		msg.RawContent = string(raw)
-		if msg.From == "" || len(msg.ToList) == 0 {
-			log.Printf("skip invalid message without from/tolist: seq=%d msgid=%s", chatData.Seq, chatData.MsgID)
+		if msg.From == "" {
+			log.Printf("skip invalid message without from: seq=%d msgid=%s", chatData.Seq, chatData.MsgID)
 			continue
 		}
 
-		stream := streamKey(r.cfg.StreamPrefix, &msg)
+		event, err := buildIngressEvent(r.cfg.WeComCorpID, &msg)
+		if err != nil {
+			log.Printf("skip invalid ingress event: seq=%d msgid=%s err=%v", chatData.Seq, chatData.MsgID, err)
+			continue
+		}
+
+		stream := streamKey(r.cfg.StreamPrefix, Session{SessionKey: event.SessionKey})
 		if err := r.redis.XAdd(ctx, &redis.XAddArgs{
 			Stream: stream,
-			Values: streamValues(msg),
+			Values: streamValues(event),
 		}).Err(); err != nil {
 			return seq, fmt.Errorf("xadd %s failed: %w", stream, err)
 		}
@@ -129,23 +135,4 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 	}
 
 	return seq, nil
-}
-
-func streamValues(msg WeComMessage) map[string]any {
-	return map[string]any{
-		"msgid": msg.MsgID,
-		"raw":   msg.RawContent,
-	}
-}
-
-func streamKey(prefix string, msg *WeComMessage) string {
-	roomID := msg.RoomID
-	if msg.RoomID == "" {
-		from, to := msg.From, msg.ToList[0]
-		if from > to {
-			from, to = to, from
-		}
-		roomID = from + "-" + to
-	}
-	return prefix + ":" + roomID
 }
