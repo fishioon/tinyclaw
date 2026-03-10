@@ -29,9 +29,9 @@ func NewSDKErr(code int) error {
 }
 
 type ChatData struct {
-	Seq              int64 `json:"seq,omitempty"`
+	Seq              int64  `json:"seq,omitempty"`
 	MsgID            string `json:"msgid,omitempty"`
-	PublicKeyVer     int32 `json:"publickey_ver,omitempty"`
+	PublicKeyVer     int32  `json:"publickey_ver,omitempty"`
 	ChatID           string `json:"chat_id,omitempty"`
 	EncryptRandomKey string `json:"encrypt_random_key"`
 	EncryptChatMsg   string `json:"encrypt_chat_msg"`

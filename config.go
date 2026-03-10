@@ -6,9 +6,9 @@ import (
 )
 
 const (
-	defaultRedisAddr       = "127.0.0.1:6379"
-	defaultStreamPrefix    = "stream:group"
-	defaultWeComSeqKey     = "msg:seq"
+	defaultRedisAddr    = "127.0.0.1:6379"
+	defaultStreamPrefix = "stream:group"
+	defaultWeComSeqKey  = "msg:seq"
 )
 
 type Config struct {
@@ -17,10 +17,12 @@ type Config struct {
 	RedisDB       int
 	StreamPrefix  string
 
-	WeComCorpID      string
-	WeComCorpSecret  string
-	WeComPrivateKey  string
-	WeComSeqKey      string
+	WeComCorpID        string
+	WeComCorpSecret    string
+	WeComPrivateKey    string
+	WeComSeqKey        string
+	WeComContactSecret string
+	WeComBotID         string
 }
 
 func LoadConfig() (Config, error) {
@@ -36,10 +38,12 @@ func LoadConfig() (Config, error) {
 		RedisDB:       redisDB,
 		StreamPrefix:  envOrDefault("STREAM_PREFIX", defaultStreamPrefix),
 
-		WeComCorpID:     os.Getenv("WECOM_CORP_ID"),
-		WeComCorpSecret: os.Getenv("WECOM_CORP_SECRET"),
-		WeComPrivateKey: os.Getenv("WECOM_RSA_PRIVATE_KEY"),
-		WeComSeqKey:     envOrDefault("WECOM_SEQ_KEY", defaultWeComSeqKey),
+		WeComCorpID:        os.Getenv("WECOM_CORP_ID"),
+		WeComCorpSecret:    os.Getenv("WECOM_CORP_SECRET"),
+		WeComPrivateKey:    os.Getenv("WECOM_RSA_PRIVATE_KEY"),
+		WeComSeqKey:        envOrDefault("WECOM_SEQ_KEY", defaultWeComSeqKey),
+		WeComContactSecret: os.Getenv("WECOM_CONTACT_SECRET"),
+		WeComBotID:         os.Getenv("WECOM_BOT_ID"),
 	}
 
 	return cfg, nil
