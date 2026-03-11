@@ -8,11 +8,8 @@ export interface AgentEnv {
   redisUsername?: string;
   redisPassword?: string;
   redisDb: number;
-  streamPrefix: string;
   consumerGroupPrefix: string;
   consumerName: string;
-  wecomEgressBaseUrl: string;
-  wecomEgressToken: string;
   anthropicApiKey?: string;
   anthropicBaseUrl?: string;
   claudeCodeOauthToken?: string;

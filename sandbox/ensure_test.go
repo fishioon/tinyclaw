@@ -32,9 +32,6 @@ func newTestOrchestrator(t *testing.T, client *sandboxfake.Clientset) (*Orchestr
 		Namespace:       "claw",
 		Image:           "ghcr.io/test/agent:latest",
 		RedisAddr:       "redis:6379",
-		StreamPrefix:    "stream:room",
-		EgressBaseURL:   "http://clawman:8080/egress",
-		EgressToken:     "test-token",
 		ModelAPIBaseURL: "http://llm:4000",
 		ModelAPIKey:     "sk-test",
 	})
@@ -90,17 +87,14 @@ func TestEnsure_CreatesSandbox(t *testing.T) {
 		envMap[e.Name] = e.Value
 	}
 	wantEnv := map[string]string{
-		"ROOM_ID":              "test-room-123",
-		"TENANT_ID":            "corp1",
-		"CHAT_TYPE":            "group",
-		"REDIS_ADDR":           "redis:6379",
-		"REDIS_USERNAME":       "sb:test-room-123",
-		"REDIS_PASSWORD":       "test-password",
-		"STREAM_PREFIX":        "stream:room",
-		"WECOM_EGRESS_BASE_URL": "http://clawman:8080/egress",
-		"WECOM_EGRESS_TOKEN":   "test-token",
-		"MODEL_API_BASE_URL":   "http://llm:4000",
-		"MODEL_API_KEY":        "sk-test",
+		"ROOM_ID":            "test-room-123",
+		"TENANT_ID":          "corp1",
+		"CHAT_TYPE":          "group",
+		"REDIS_ADDR":         "redis:6379",
+		"REDIS_USERNAME":     "sb:test-room-123",
+		"REDIS_PASSWORD":     "test-password",
+		"MODEL_API_BASE_URL": "http://llm:4000",
+		"MODEL_API_KEY":      "sk-test",
 	}
 	for k, v := range wantEnv {
 		if envMap[k] != v {

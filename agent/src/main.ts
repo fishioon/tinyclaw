@@ -8,7 +8,7 @@ import { createRuntime } from './runtime.js';
 const env = loadEnv();
 const redis = createRedisClient(env);
 const runtime = createRuntime(env);
-const egress = new WecomEgressClient(env);
+const egress = new WecomEgressClient(redis, env);
 const consumer = new AgentConsumer(redis, env, runtime, egress);
 
 let shutdownRequested = false;

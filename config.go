@@ -7,7 +7,6 @@ import (
 
 const (
 	defaultRedisAddr    = "127.0.0.1:6379"
-	defaultStreamPrefix = "stream:room"
 	defaultWeComSeqKey  = "msg:seq"
 )
 
@@ -15,7 +14,6 @@ type Config struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
-	StreamPrefix  string
 
 	WeComCorpID        string
 	WeComCorpSecret    string
@@ -29,8 +27,6 @@ type Config struct {
 	SandboxImage     string
 
 	WorkToolRobotID string
-	EgressAddr      string
-	EgressToken     string
 
 	ModelAPIBaseURL string
 	ModelAPIKey     string
@@ -52,7 +48,6 @@ func LoadConfig() (Config, error) {
 		RedisAddr:     envOrDefault("REDIS_ADDR", defaultRedisAddr),
 		RedisPassword: os.Getenv("REDIS_PASSWORD"),
 		RedisDB:       redisDB,
-		StreamPrefix:  envOrDefault("STREAM_PREFIX", defaultStreamPrefix),
 
 		WeComCorpID:        os.Getenv("WECOM_CORP_ID"),
 		WeComCorpSecret:    os.Getenv("WECOM_CORP_SECRET"),
@@ -66,8 +61,6 @@ func LoadConfig() (Config, error) {
 		SandboxImage:     os.Getenv("SANDBOX_IMAGE"),
 
 		WorkToolRobotID: os.Getenv("WORKTOOL_ROBOT_ID"),
-		EgressAddr:      envOrDefault("EGRESS_ADDR", ":8080"),
-		EgressToken:     os.Getenv("EGRESS_TOKEN"),
 
 		ModelAPIBaseURL: os.Getenv("MODEL_API_BASE_URL"),
 		ModelAPIKey:     os.Getenv("MODEL_API_KEY"),

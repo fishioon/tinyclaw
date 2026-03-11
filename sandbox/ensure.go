@@ -32,15 +32,12 @@ type RedisCredential struct {
 type UserProvisioner func(ctx context.Context, roomID string) (RedisCredential, error)
 
 type Config struct {
-	Namespace    string // K8s namespace for sandboxes
-	Image        string // Agent container image
-	RedisAddr    string // Passed to sandbox as env var
-	StreamPrefix string // Passed to sandbox as env var
+	Namespace string // K8s namespace for sandboxes
+	Image     string // Agent container image
+	RedisAddr string // Passed to sandbox as env var
 
-	EgressBaseURL  string // Egress endpoint URL for agent to POST replies
-	EgressToken    string // Bearer token for egress auth
 	ModelAPIBaseURL string // LLM API base URL
-	ModelAPIKey    string // LLM API key
+	ModelAPIKey     string // LLM API key
 }
 
 type Orchestrator struct {
@@ -101,14 +98,17 @@ func (o *Orchestrator) provisionRedisUser(ctx context.Context, roomID string) (R
 		return RedisCredential{}, fmt.Errorf("generate password: %w", err)
 	}
 
-	streamPattern := o.cfg.StreamPrefix + ":" + roomID
+	inStream := "stream:i:" + roomID
+	outStream := "stream:o:" + roomID
 
 	// ACL SETUSER <user> on ><password> ~<key-pattern> +allowed-commands
+	// Allow read on ingress stream + write on egress stream
 	err = o.redis.Do(ctx, "ACL", "SETUSER", username,
 		"on",
 		">"+password,
-		"~"+streamPattern,
-		"+xreadgroup", "+xack", "+xinfo", "+xgroup", "+ping",
+		"~"+inStream,
+		"~"+outStream,
+		"+xreadgroup", "+xack", "+xinfo", "+xgroup", "+xadd", "+ping",
 	).Err()
 	if err != nil {
 		return RedisCredential{}, fmt.Errorf("acl setuser: %w", err)
@@ -156,9 +156,6 @@ func buildSandbox(name string, cfg Config, roomID, tenantID, chatType string, cr
 								{Name: "REDIS_ADDR", Value: cfg.RedisAddr},
 								{Name: "REDIS_USERNAME", Value: cred.Username},
 								{Name: "REDIS_PASSWORD", Value: cred.Password},
-								{Name: "STREAM_PREFIX", Value: cfg.StreamPrefix},
-								{Name: "WECOM_EGRESS_BASE_URL", Value: cfg.EgressBaseURL},
-								{Name: "WECOM_EGRESS_TOKEN", Value: cfg.EgressToken},
 								{Name: "MODEL_API_BASE_URL", Value: cfg.ModelAPIBaseURL},
 								{Name: "MODEL_API_KEY", Value: cfg.ModelAPIKey},
 							},

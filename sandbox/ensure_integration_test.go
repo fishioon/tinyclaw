@@ -34,24 +34,22 @@ func TestACL_ProvisionAndScope(t *testing.T) {
 
 	orch := &Orchestrator{
 		redis: rdb,
-		cfg: Config{
-			StreamPrefix: "stream:room",
-		},
+		cfg:   Config{},
 	}
 
 	roomID := "integration-test-room"
 	username := "sb:" + roomID
-	streamKey := "stream:room:" + roomID
-	otherStream := "stream:room:other-room"
+	inStream := "stream:i:" + roomID
+	outStream := "stream:o:" + roomID
 
 	// Cleanup after test
 	t.Cleanup(func() {
 		rdb.Do(ctx, "ACL", "DELUSER", username)
-		rdb.Del(ctx, streamKey, otherStream)
+		rdb.Del(ctx, inStream, outStream)
 	})
 	// Pre-clean in case previous run left state
 	rdb.Do(ctx, "ACL", "DELUSER", username)
-	rdb.Del(ctx, streamKey, otherStream)
+	rdb.Del(ctx, inStream, outStream)
 
 	// Provision the user
 	cred, err := orch.provisionRedisUser(ctx, roomID)
@@ -78,29 +76,40 @@ func TestACL_ProvisionAndScope(t *testing.T) {
 		t.Fatalf("user ping failed: %v", err)
 	}
 
-	// XGROUP CREATE on own stream should work
-	err = userClient.XGroupCreateMkStream(ctx, streamKey, "test-group", "0").Err()
+	// XGROUP CREATE on own ingress stream should work
+	err = userClient.XGroupCreateMkStream(ctx, inStream, "test-group", "0").Err()
 	if err != nil {
-		t.Fatalf("xgroup create on own stream failed: %v", err)
+		t.Fatalf("xgroup create on ingress stream failed: %v", err)
 	}
 
-	// XINFO on own stream should work
-	err = userClient.Do(ctx, "XINFO", "STREAM", streamKey).Err()
+	// XINFO on own ingress stream should work
+	err = userClient.Do(ctx, "XINFO", "STREAM", inStream).Err()
 	if err != nil {
-		t.Fatalf("xinfo on own stream failed: %v", err)
+		t.Fatalf("xinfo on ingress stream failed: %v", err)
 	}
 
-	// XACK on own stream should work (no-op, returns 0)
-	err = userClient.XAck(ctx, streamKey, "test-group", "0-0").Err()
+	// XACK on own ingress stream should work (no-op, returns 0)
+	err = userClient.XAck(ctx, inStream, "test-group", "0-0").Err()
 	if err != nil {
-		t.Fatalf("xack on own stream failed: %v", err)
+		t.Fatalf("xack on ingress stream failed: %v", err)
+	}
+
+	// XADD on own egress stream should work
+	err = userClient.XAdd(ctx, &redis.XAddArgs{
+		Stream: outStream,
+		Values: map[string]any{"text": "hello"},
+	}).Err()
+	if err != nil {
+		t.Fatalf("xadd on egress stream failed: %v", err)
 	}
 
 	// Access to a different room's stream should be denied
+	otherStream := "stream:i:other-room"
 	err = userClient.XGroupCreateMkStream(ctx, otherStream, "test-group", "0").Err()
 	if err == nil {
 		t.Fatal("expected NOPERM error accessing other room's stream, got nil")
 	}
+	t.Cleanup(func() { rdb.Del(ctx, otherStream) })
 
 	// SET should be denied (not in allowed commands)
 	err = userClient.Set(ctx, "some-key", "value", 0).Err()

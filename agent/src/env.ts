@@ -70,7 +70,6 @@ export function loadEnv(): AgentEnv {
   const roomId = requireEnv('ROOM_ID');
   const tenantId = requireEnv('TENANT_ID');
   const chatType = requireEnv('CHAT_TYPE');
-  const streamPrefix = requireEnv('STREAM_PREFIX');
   const consumerGroupPrefix =
     process.env.CONSUMER_GROUP_PREFIX?.trim() || 'cg:room';
 
@@ -82,11 +81,8 @@ export function loadEnv(): AgentEnv {
     redisUsername: process.env.REDIS_USERNAME?.trim() || undefined,
     redisPassword: process.env.REDIS_PASSWORD?.trim() || undefined,
     redisDb: parseInteger('REDIS_DB', 0),
-    streamPrefix,
     consumerGroupPrefix,
     consumerName: process.env.CONSUMER_NAME?.trim() || os.hostname(),
-    wecomEgressBaseUrl: requireEnv('WECOM_EGRESS_BASE_URL'),
-    wecomEgressToken: requireEnv('WECOM_EGRESS_TOKEN'),
     anthropicApiKey:
       process.env.ANTHROPIC_API_KEY?.trim() ||
       process.env.MODEL_API_KEY?.trim() ||
@@ -112,7 +108,7 @@ export function loadEnv(): AgentEnv {
     claudeAllowedTools: parseCsv(process.env.CLAUDE_ALLOWED_TOOLS?.trim()),
     claudeDisallowedTools: parseCsv(process.env.CLAUDE_DISALLOWED_TOOLS?.trim()),
     claudeMaxTurns: parseInteger('CLAUDE_MAX_TURNS', 16),
-    streamKey: `${streamPrefix}:${roomId}`,
+    streamKey: `stream:i:${roomId}`,
     consumerGroup: `${consumerGroupPrefix}:${roomId}`,
   };
 }

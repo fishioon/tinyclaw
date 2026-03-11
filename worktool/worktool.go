@@ -13,6 +13,12 @@ import (
 
 var baseURL = "https://api.worktool.ymdyes.cn"
 
+// SetBaseURL overrides the API base URL (for testing).
+func SetBaseURL(u string) { baseURL = u }
+
+// ResetBaseURL restores the default API base URL.
+func ResetBaseURL() { baseURL = "https://api.worktool.ymdyes.cn" }
+
 const (
 	sendMessageEndpoint = "/wework/sendRawMessage"
 	defaultTimeout      = 30 * time.Second

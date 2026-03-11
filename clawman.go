@@ -29,12 +29,13 @@ type Identity struct {
 }
 
 type Clawman struct {
-	cfg   Config
-	redis *redis.Client
-	sdk   *finance.SDK
-	wecom *wecom.Client
-	orch  *sandbox.Orchestrator
-	seq   uint64
+	cfg    Config
+	redis  *redis.Client
+	sdk    *finance.SDK
+	wecom  *wecom.Client
+	orch   *sandbox.Orchestrator
+	egress *EgressConsumer
+	seq    uint64
 }
 
 type WeComMessage struct {
@@ -48,7 +49,7 @@ type WeComMessage struct {
 	RawContent string   `json:"-"`
 }
 
-func NewClawman(cfg Config, rdb *redis.Client, orch *sandbox.Orchestrator) (*Clawman, error) {
+func NewClawman(cfg Config, rdb *redis.Client, orch *sandbox.Orchestrator, egress *EgressConsumer) (*Clawman, error) {
 	if cfg.WeComCorpID == "" || cfg.WeComCorpSecret == "" || cfg.WeComPrivateKey == "" {
 		return nil, fmt.Errorf("WECOM_CORP_ID/WECOM_CORP_SECRET/WECOM_RSA_PRIVATE_KEY are required")
 	}
@@ -71,11 +72,12 @@ func NewClawman(cfg Config, rdb *redis.Client, orch *sandbox.Orchestrator) (*Cla
 	}
 
 	return &Clawman{
-		cfg:   cfg,
-		redis: rdb,
-		sdk:   sdk,
-		wecom: wc,
-		orch:  orch,
+		cfg:    cfg,
+		redis:  rdb,
+		sdk:    sdk,
+		wecom:  wc,
+		orch:   orch,
+		egress: egress,
 	}, nil
 }
 
@@ -148,7 +150,7 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			roomID = msg.From
 		}
 
-		stream := r.cfg.StreamPrefix + ":" + roomID
+		stream := "stream:i:" + roomID
 		if err := r.redis.XAdd(ctx, &redis.XAddArgs{
 			Stream: stream,
 			Values: streamValues(msg),
@@ -165,6 +167,11 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			r.orch.Ensure(ctx, roomID, r.cfg.WeComCorpID, ct)
 		}
 
+		// Register egress stream for this room
+		if r.egress != nil {
+			r.egress.RegisterRoom(ctx, roomID)
+		}
+
 		// Cache room target name for egress lookup
 		r.cacheTarget(ctx, &msg, roomID)
 	}
@@ -177,19 +184,6 @@ func streamValues(msg WeComMessage) map[string]any {
 		"msgid": msg.MsgID,
 		"raw":   msg.RawContent,
 	}
-}
-
-func streamKey(prefix string, msg *WeComMessage) string {
-	if msg.RoomID != "" {
-		return prefix + ":" + msg.RoomID
-	}
-	// 私聊直接用 from 作为 room ID
-	return prefix + ":" + msg.From
-}
-
-// roomIDFromStream extracts the room ID from a full stream key.
-func roomIDFromStream(prefix, stream string) string {
-	return strings.TrimPrefix(stream, prefix+":")
 }
 
 // cacheTarget resolves and caches the display name for a room/user so egress
