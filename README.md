@@ -8,7 +8,8 @@
 ## Agent Scaffold
 - `agent/`：独立的 TypeScript agent 子工程，提供 v0 最小骨架：
   - 启动校验和 Redis consumer group 初始化
-  - `XREADGROUP BLOCK` 串行消费 `stream:room:{room_id}`
+  - `XREADGROUP BLOCK` 串行消费 `stream:i:{room_id}`
+  - 将回复写入 `stream:o:{room_id}`
   - 成功回发后 `XACK`
   - Claude-first runtime（当前内置 `echo` 测试实现和 `claude_agent_sdk` 真实实现）
   - 独立 `Dockerfile` 和 `tini + entrypoint.sh` 进程模型
@@ -17,7 +18,7 @@
   - `cd agent && npm test`
   - `cd agent && npm run test:live`  # 真实 Claude smoke，依赖 `../.env`
 - 测试说明：
-  - `agent` 集成测试会启动临时 Docker Redis 容器和本地 mock HTTP 服务。
+  - `agent` 集成测试会启动临时 Docker Redis 容器，并校验 ingress/egress stream 行为。
   - 可通过 `AGENT_READ_BLOCK_MS` 缩短阻塞读取时长，便于测试和优雅退出。
 - `claude_agent_sdk` 运行时通过 `ANTHROPIC_API_KEY` 或 `CLAUDE_CODE_OAUTH_TOKEN` 认证；`ANTHROPIC_BASE_URL` 可选。
 - `claude_agent_sdk` 运行时会显式查找 `claude` 可执行程序，可通过 `CLAUDE_CODE_EXECUTABLE` 覆盖。
@@ -70,9 +71,7 @@
   - `WECOM_RSA_PRIVATE_KEY`（必需）
   - `REDIS_ADDR`（可选，默认 `redis:6379`）
   - `REDIS_PASSWORD`（可选）
-  - `STREAM_PREFIX`（可选，默认 `stream:room`）
   - `WECOM_SEQ_KEY`（可选，默认 `msg:seq`）
 - 目前仓库内默认值：
   - `REDIS_ADDR=redis:6379`
-  - `STREAM_PREFIX=stream:room`
   - `WECOM_SEQ_KEY=msg:seq`

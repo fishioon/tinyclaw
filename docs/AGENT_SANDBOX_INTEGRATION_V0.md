@@ -18,7 +18,7 @@
 
 1. `Ingress Service`
    - 拉取企业微信消息并标准化。
-   - 按 `stream:room:{room_id}` 写入消息流。
+   - 按 `stream:i:{room_id}` 写入 ingress 消息流。
    - 调用 `ensure`，保证目标 sandbox 存在或被唤醒。
 
 2. `Sandbox Orchestrator`
@@ -27,7 +27,7 @@
    - 运行态以 K8s `Sandbox` / Pod 状态为准。
 
 3. `Agent Runtime (in Sandbox)`
-   - 使用 `XREADGROUP BLOCK` 持续拉取 `stream:room:{room_id}`。
+   - 使用 `XREADGROUP BLOCK` 持续拉取 `stream:i:{room_id}`。
    - 串行处理消息、调用模型与工具、回发企业微信。
    - 容器内只负责 agent 运行时初始化、消息消费和优雅退出。
 
@@ -105,12 +105,8 @@ CHAT_TYPE
 REDIS_ADDR
 REDIS_PASSWORD           # 可空
 REDIS_DB                 # 默认 0
-STREAM_PREFIX            # v0 目标值为 stream:room
 CONSUMER_GROUP_PREFIX    # 默认 cg:room
 CONSUMER_NAME            # 默认 hostname
-
-WECOM_EGRESS_BASE_URL
-WECOM_EGRESS_TOKEN
 
 ANTHROPIC_API_KEY         # 与 CLAUDE_CODE_OAUTH_TOKEN 二选一
 CLAUDE_CODE_OAUTH_TOKEN   # 与 ANTHROPIC_API_KEY 二选一
@@ -134,9 +130,11 @@ AGENT_TMPDIR             # 默认 /tmp
 ```
 
 说明：
-- agent 应从 `STREAM_PREFIX` 和 `ROOM_ID` 组合 stream key，而不是在镜像内写死完整键名。
+- 当前实现固定使用：
+  - ingress stream: `stream:i:{ROOM_ID}`
+  - egress stream: `stream:o:{ROOM_ID}`
 - consumer group 名称可由 `CONSUMER_GROUP_PREFIX + ":" + ROOM_ID` 推导。
-- 回发企业微信建议走统一 egress API，而不是让 agent 直连企业微信全部接口。
+- agent 只负责把回复写入 Redis egress stream，由主服务统一回发企业微信。
 
 ## 7. 文件系统与卷布局
 
@@ -164,9 +162,6 @@ AGENT_TMPDIR             # 默认 /tmp
 entrypoint 应至少检查：
 - `ROOM_ID`
 - `REDIS_ADDR`
-- `STREAM_PREFIX`
-- `WECOM_EGRESS_BASE_URL`
-- `WECOM_EGRESS_TOKEN`
 - `ANTHROPIC_API_KEY` 或 `CLAUDE_CODE_OAUTH_TOKEN`
 
 ### 8.2 Readiness
@@ -192,7 +187,8 @@ agent 容器可认定为 ready 的条件：
 ## 9. 消息消费与 ACK 契约
 
 stream 约定：
-- Stream: `stream:room:{room_id}`
+- Ingress Stream: `stream:i:{room_id}`
+- Egress Stream: `stream:o:{room_id}`
 - Consumer Group: `cg:room:{room_id}`
 
 ACK 规则（简化版）：
@@ -211,17 +207,18 @@ ACK 规则（简化版）：
 ### 10.1 首条消息触发
 
 1. Ingress 拉到企业微信消息并标准化。
-2. `XADD stream:room:{room_id}`。
+2. `XADD stream:i:{room_id}`。
 3. Ingress 同步调用 `POST /internal/room-runtime/ensure`。
 4. Orchestrator create-or-get `Sandbox`。
 5. sandbox 就绪后，容器内 entrypoint 启动 agent runtime。
 6. agent 确保 consumer group 存在，再 `XREADGROUP BLOCK` 拉到消息并处理。
-7. agent 调用统一 egress API 回发企业微信。
-8. 回发成功后 `XACK`。
+7. agent 将回复写入 `stream:o:{room_id}`。
+8. 主服务消费 egress stream 并统一回发企业微信。
+9. 回发成功后 `XACK`。
 
 ### 10.2 活跃会话
 
-1. 新消息持续 `XADD` 到该 room stream。
+1. 新消息持续 `XADD` 到该 room ingress stream。
 2. 同一 `room_id` 的 agent 串行消费，保持顺序。
 3. 无新消息时保持阻塞等待，不主动退出。
 

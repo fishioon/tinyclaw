@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -106,54 +105,17 @@ async function stopRedisContainer(name) {
   await runCommand('docker', ['rm', '-f', name]).catch(() => undefined);
 }
 
-function startMockEgressServer() {
-  const requests = [];
-  const server = http.createServer((req, res) => {
-    const chunks = [];
-    req.on('data', chunk => {
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      const body = Buffer.concat(chunks).toString('utf8');
-      requests.push({
-        method: req.method,
-        url: req.url,
-        headers: req.headers,
-        body: JSON.parse(body),
+async function waitForStreamMessage(redis, streamKey, timeoutMs, buildDetails) {
+  return waitForWithDiagnostics(
+    async () => {
+      const messages = await redis.xRange(streamKey, '-', '+', {
+        COUNT: 1,
       });
-      res.statusCode = 200;
-      res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ ok: true }));
-    });
-  });
-
-  return new Promise((resolve, reject) => {
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        reject(new Error('failed to start mock egress server'));
-        return;
-      }
-      resolve({
-        server,
-        requests,
-        baseUrl: `http://127.0.0.1:${address.port}/reply`,
-      });
-    });
-  });
-}
-
-async function stopServer(server) {
-  await new Promise((resolve, reject) => {
-    server.close(error => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    });
-  });
+      return messages.length > 0 ? messages[0] : null;
+    },
+    timeoutMs,
+    buildDetails,
+  );
 }
 
 async function stopProcess(child) {
@@ -188,10 +150,10 @@ liveTest(
     const roomId = `room-${randomUUID().slice(0, 8)}`;
     const tenantId = 'tenant-live';
     const chatType = 'group';
-    const streamKey = `stream:room:${roomId}`;
+    const inStreamKey = `stream:i:${roomId}`;
+    const outStreamKey = `stream:o:${roomId}`;
     const consumerGroup = `cg:room:${roomId}`;
 
-    const { server, requests, baseUrl } = await startMockEgressServer();
     const { name: redisContainerName, redis, port } = await startRedisContainer();
     const agent = spawn('node', [path.resolve('dist/main.js')], {
       cwd: path.resolve('.'),
@@ -201,11 +163,8 @@ liveTest(
         TENANT_ID: tenantId,
         CHAT_TYPE: chatType,
         REDIS_ADDR: `127.0.0.1:${port}`,
-        STREAM_PREFIX: 'stream:room',
         CONSUMER_GROUP_PREFIX: 'cg:room',
         CONSUMER_NAME: 'agent-live-test',
-        WECOM_EGRESS_BASE_URL: baseUrl,
-        WECOM_EGRESS_TOKEN: 'test-token',
         AGENT_RUNTIME_MODE: 'claude_agent_sdk',
         AGENT_READ_BLOCK_MS: TEST_READ_BLOCK_MS,
         AGENT_WORKDIR: path.resolve('.'),
@@ -234,7 +193,7 @@ liveTest(
         async () => `agent stdout:\n${stdout || '(empty)'}\nagent stderr:\n${stderr || '(empty)'}`,
       );
 
-      const messageId = await redis.xAdd(streamKey, '*', {
+      const messageId = await redis.xAdd(inStreamKey, '*', {
         text: 'Reply with exactly: tinyclaw-live-ok',
         trace_id: 'trace-live-smoke-1',
       });
@@ -245,7 +204,7 @@ liveTest(
           stderr.includes('"msg":"message_received"'),
         10_000,
         async () => {
-          const pending = await redis.xPending(streamKey, consumerGroup);
+          const pending = await redis.xPending(inStreamKey, consumerGroup);
           return [
             'agent never logged message_received',
             `agent stdout:\n${stdout || '(empty)'}`,
@@ -255,13 +214,14 @@ liveTest(
         },
       );
 
-      await waitForWithDiagnostics(
-        () => requests.length > 0,
+      const egressMessage = await waitForStreamMessage(
+        redis,
+        outStreamKey,
         60_000,
         async () => {
-          const pending = await redis.xPending(streamKey, consumerGroup);
+          const pending = await redis.xPending(inStreamKey, consumerGroup);
           return [
-            'egress request was not observed',
+            'egress stream message was not observed',
             `agent stdout:\n${stdout || '(empty)'}`,
             `agent stderr:\n${stderr || '(empty)'}`,
             `redis pending: ${JSON.stringify(pending)}`,
@@ -269,13 +229,12 @@ liveTest(
         },
       );
 
-      const [request] = requests;
-      assert.equal(request.body.source.stream_id, messageId);
-      assert.match(request.body.reply.text, /tinyclaw-live-ok/);
-      assert.equal(request.body.reply.metadata.runtime_mode, 'claude_agent_sdk');
+      assert.equal(egressMessage.message.room_id, roomId);
+      assert.equal(egressMessage.message.source_id, messageId);
+      assert.match(egressMessage.message.text, /tinyclaw-live-ok/);
 
       const pending = await waitFor(async () => {
-        const summary = await redis.xPending(streamKey, consumerGroup);
+        const summary = await redis.xPending(inStreamKey, consumerGroup);
         return summary.pending === 0 ? summary : null;
       }, 10_000);
 
@@ -284,7 +243,6 @@ liveTest(
       await stopProcess(agent);
       await redis.quit().catch(() => undefined);
       await stopRedisContainer(redisContainerName);
-      await stopServer(server);
     }
   },
 );

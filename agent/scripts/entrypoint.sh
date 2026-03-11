@@ -5,9 +5,6 @@ set -eu
 : "${TENANT_ID:?missing TENANT_ID}"
 : "${CHAT_TYPE:?missing CHAT_TYPE}"
 : "${REDIS_ADDR:?missing REDIS_ADDR}"
-: "${STREAM_PREFIX:?missing STREAM_PREFIX}"
-: "${WECOM_EGRESS_BASE_URL:?missing WECOM_EGRESS_BASE_URL}"
-: "${WECOM_EGRESS_TOKEN:?missing WECOM_EGRESS_TOKEN}"
 
 runtime_mode="${AGENT_RUNTIME_MODE:-claude_agent_sdk}"
 if [ "$runtime_mode" != "echo" ]; then
