@@ -33,7 +33,9 @@ jobs:
         run: go test ./...
 
       - name: Integration Test
-        run: go test ./sandbox/ -tags integration -v -count=1
+        run: |
+          go test ./sandbox/ -tags integration -v -count=1
+          go test . -tags integration -v -count=1 -run TestEgress
         env:
           REDIS_ADDR: localhost:6379
 
