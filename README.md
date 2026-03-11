@@ -48,7 +48,7 @@
 - 群聊消息按 `roomid` 分流：
   - 先调用 `msgaudit/groupchat/get` 解析内部群详情
   - 若不是内部群，再调用 `externalcontact/groupchat/get` 解析客户群详情
-- 群详情与 owner 会写入 Redis 短缓存，供 egress 回发目标解析复用。
+- 群详情会写入 Redis 短缓存，供 egress 回发目标解析复用。
 
 ## K8s 部署
 - 命名空间固定为 `claw`。

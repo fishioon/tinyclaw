@@ -164,6 +164,39 @@ func TestResolveInternalUserUsesUserAPI(t *testing.T) {
 	}
 }
 
+func TestResolveFailureDoesNotCachePlaceholder(t *testing.T) {
+	var externalCalls int
+
+	server := newWeComTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cgi-bin/externalcontact/get":
+			externalCalls++
+			writeJSON(t, w, map[string]any{
+				"errcode": 40001,
+				"errmsg":  "temporary failure",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	clawman, rdb := newTestClawman(t, server.URL)
+	ctx := context.Background()
+
+	if _, err := clawman.Resolve(ctx, "wm123"); err == nil {
+		t.Fatal("Resolve error = nil, want non-nil")
+	}
+	if _, err := clawman.Resolve(ctx, "wm123"); err == nil {
+		t.Fatal("Resolve second error = nil, want non-nil")
+	}
+	if externalCalls != 2 {
+		t.Fatalf("external contact API calls = %d, want 2", externalCalls)
+	}
+	if ttl := rdb.TTL(ctx, externalContactCachePrefix+"wm123").Val(); ttl != -2 {
+		t.Fatalf("cache ttl = %s, want missing key", ttl)
+	}
+}
+
 func TestResolveGroupUsesArchiveFirstThenFallsBackToCustomerGroup(t *testing.T) {
 	var customerGroupCalls int
 	var archiveGroupCalls int
@@ -250,5 +283,48 @@ func TestResolveGroupUsesArchiveFirstThenFallsBackToCustomerGroup(t *testing.T) 
 	ttl := rdb.TTL(ctx, groupDetailCachePrefix+"room-internal").Val()
 	if ttl < 59*time.Minute || ttl > time.Hour {
 		t.Fatalf("group cache ttl = %s, want about 1h", ttl)
+	}
+}
+
+func TestResolveGroupFailureDoesNotCachePlaceholder(t *testing.T) {
+	var archiveGroupCalls int
+	var customerGroupCalls int
+
+	server := newWeComTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cgi-bin/msgaudit/groupchat/get":
+			archiveGroupCalls++
+			writeJSON(t, w, map[string]any{
+				"errcode": 40001,
+				"errmsg":  "archive miss",
+			})
+		case "/cgi-bin/externalcontact/groupchat/get":
+			customerGroupCalls++
+			writeJSON(t, w, map[string]any{
+				"errcode": 40002,
+				"errmsg":  "customer miss",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	clawman, rdb := newTestClawman(t, server.URL)
+	ctx := context.Background()
+
+	if _, err := clawman.ResolveGroup(ctx, "room-missing"); err == nil {
+		t.Fatal("ResolveGroup error = nil, want non-nil")
+	}
+	if _, err := clawman.ResolveGroup(ctx, "room-missing"); err == nil {
+		t.Fatal("ResolveGroup second error = nil, want non-nil")
+	}
+	if archiveGroupCalls != 2 {
+		t.Fatalf("archive group API calls = %d, want 2", archiveGroupCalls)
+	}
+	if customerGroupCalls != 2 {
+		t.Fatalf("customer group API calls = %d, want 2", customerGroupCalls)
+	}
+	if ttl := rdb.TTL(ctx, groupDetailCachePrefix+"room-missing").Val(); ttl != -2 {
+		t.Fatalf("group cache ttl = %s, want missing key", ttl)
 	}
 }

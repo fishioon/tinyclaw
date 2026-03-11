@@ -41,7 +41,6 @@ WeChat Work Finance SDK → Clawman (3s poll loop) → Redis Stream per room →
 | `wecom:contact:external:{id}` | External contact cache (1h TTL) |
 | `wecom:user:internal:{id}` | Internal user cache (1h TTL) |
 | `wecom:group:detail:{roomID}` | Group detail cache (1h TTL) |
-| `wecom:group:owner:{roomID}` | Group owner cache (1h TTL) |
 | `lock:ensure:{room_id}` | Ensure-once lock (3s TTL) |
 
 ### Message flow
