@@ -171,6 +171,68 @@ func TestEgress_TargetNotFound(t *testing.T) {
 	<-done
 }
 
+func TestEgress_RecoversExistingStreamOnStartup(t *testing.T) {
+	var gotBody worktool.SendMessageRequest
+	called := make(chan struct{}, 1)
+	wtServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		json.NewEncoder(w).Encode(worktool.SendMessageResponse{Code: 200, Message: "ok"})
+		select {
+		case called <- struct{}{}:
+		default:
+		}
+	}))
+	defer wtServer.Close()
+
+	consumer, rdb := setupEgressConsumer(t, wtServer)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	roomID := "egress-test-recover"
+	streamKey := "stream:o:" + roomID
+	targetKey := "wecom:target:" + roomID
+
+	rdb.Del(ctx, streamKey, targetKey)
+	t.Cleanup(func() {
+		rdb.Del(context.Background(), streamKey, targetKey)
+	})
+
+	rdb.Set(ctx, targetKey, "恢复测试群", 0)
+	rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: streamKey,
+		Values: map[string]any{
+			"room_id":   roomID,
+			"text":      "recover existing egress stream",
+			"source_id": "recover-1234-0",
+		},
+	})
+
+	done := make(chan struct{})
+	go func() {
+		consumer.Run(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for worktool call from recovered egress stream")
+	}
+
+	cancel()
+	<-done
+
+	if len(gotBody.List) != 1 {
+		t.Fatalf("worktool got %d items, want 1", len(gotBody.List))
+	}
+	if gotBody.List[0].TitleList[0] != "恢复测试群" {
+		t.Errorf("target = %q, want %q", gotBody.List[0].TitleList[0], "恢复测试群")
+	}
+	if gotBody.List[0].ReceivedContent != "recover existing egress stream" {
+		t.Errorf("content = %q, want %q", gotBody.List[0].ReceivedContent, "recover existing egress stream")
+	}
+}
+
 func TestEgress_InvalidMessage(t *testing.T) {
 	wtCalled := make(chan struct{}, 1)
 	wtServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

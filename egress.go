@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +56,8 @@ func (c *EgressConsumer) RegisterRoom(ctx context.Context, roomID string) {
 
 // Run blocks until ctx is cancelled, consuming from all registered egress streams.
 func (c *EgressConsumer) Run(ctx context.Context) error {
+	c.discoverExistingRooms(ctx)
+
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -92,6 +95,28 @@ func (c *EgressConsumer) Run(ctx context.Context) error {
 				c.processMessage(ctx, stream.Stream, msg)
 			}
 		}
+	}
+}
+
+func (c *EgressConsumer) discoverExistingRooms(ctx context.Context) {
+	var cursor uint64
+	for {
+		keys, next, err := c.redis.Scan(ctx, cursor, "stream:o:*", 100).Result()
+		if err != nil {
+			slog.Error("egress scan streams failed", "err", err)
+			return
+		}
+		for _, key := range keys {
+			roomID := strings.TrimPrefix(key, "stream:o:")
+			if roomID == "" {
+				continue
+			}
+			c.RegisterRoom(ctx, roomID)
+		}
+		if next == 0 {
+			return
+		}
+		cursor = next
 	}
 }
 

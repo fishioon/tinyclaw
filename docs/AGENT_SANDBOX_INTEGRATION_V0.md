@@ -36,7 +36,7 @@
 建议命名规范（K8s）：
 
 ```text
-Sandbox.name = tinyclaw-agent-{hash(room_id)}
+Sandbox.name = clawagent-{room_id_lower}
 labels:
   tinyclaw/room_id: "{room_id}"
   tinyclaw/tenant_id: "{tenant_id}"

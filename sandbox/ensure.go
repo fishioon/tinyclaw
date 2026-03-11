@@ -180,5 +180,5 @@ func buildSandbox(name string, cfg Config, roomID, tenantID, chatType string, cr
 
 // sandboxName returns a deterministic Sandbox name for a room ID.
 func sandboxName(roomID string) string {
-	return "tinyclaw-agent-" + strings.ToLower(roomID)
+	return "clawagent-" + strings.ToLower(roomID)
 }
