@@ -46,9 +46,12 @@
 - 部署清单：
   - `k8s/namespace.yaml`
   - `k8s/configmap.example.yaml`
+  - `k8s/redis.yaml`
   - `k8s/deployment.yaml`
   - `k8s/secret.example.yaml`
 - K8s Deployment 资源名固定为 `clawman`（见 `k8s/deployment.yaml`）。
+- 仓库内提供一个单副本 `redis` Deployment + Service（见 `k8s/redis.yaml`），默认暴露为 `redis.claw.svc.cluster.local:6379`。
+- 当前 Redis 清单使用 `emptyDir` 保存 `/data`，适合开发/起步环境；如果需要持久化或高可用，后续应切到 PVC / 托管 Redis。
 - 配置分层守则：
   - 非敏感配置进入 `ConfigMap` / GitHub `vars`
   - 敏感凭据进入 `Secret` / GitHub `secrets`

@@ -91,6 +91,9 @@ jobs:
             --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Apply redis
+        run: kubectl apply -f k8s/redis.yaml
+
       - name: Apply deployment
         run: kubectl apply -f k8s/deployment.yaml
 
@@ -104,4 +107,6 @@ jobs:
           kubectl -n claw set image deployment/clawman clawman="${IMAGE_REF}"
 
       - name: Wait rollout
-        run: kubectl -n claw rollout status deployment/clawman --timeout=300s
+        run: |
+          kubectl -n claw rollout status deployment/redis --timeout=300s
+          kubectl -n claw rollout status deployment/clawman --timeout=300s
