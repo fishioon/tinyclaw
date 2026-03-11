@@ -23,8 +23,10 @@ spec:
           image: ghcr.io/fishioon/tinyclaw:latest
           imagePullPolicy: Always
           envFrom:
+            - configMapRef:
+                name: tinyclaw-config
             - secretRef:
-                name: tinyclaw-env
+                name: tinyclaw-secret
           resources:
             requests:
               cpu: 100m

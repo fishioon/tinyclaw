@@ -23,6 +23,7 @@
 - `claude_agent_sdk` 运行时通过 `ANTHROPIC_API_KEY` 或 `CLAUDE_CODE_OAUTH_TOKEN` 认证；`ANTHROPIC_BASE_URL` 可选。
 - `claude_agent_sdk` 运行时会显式查找 `claude` 可执行程序，可通过 `CLAUDE_CODE_EXECUTABLE` 覆盖。
 - 本地开发时，`agent` 会自动尝试加载 `agent/.env` 和仓库根目录 `.env`；测试可通过 `AGENT_LOAD_DOTENV=0` 关闭。
+- 配置守则：Claude 相关配置统一使用 `ANTHROPIC_API_KEY` 和 `ANTHROPIC_BASE_URL`；默认不兼容 `MODEL_API_KEY` / `MODEL_API_BASE_URL` 别名。
 
 ## 当前共识（2026-03-09）
 1. 统一房间标识：`room_id = {roomid_or_from}`，其中群聊取 `roomid`，私聊取 `from`；`tenant_id` 和 `chat_type` 作为独立字段保留。
@@ -44,9 +45,14 @@
 - 命名空间固定为 `claw`。
 - 部署清单：
   - `k8s/namespace.yaml`
+  - `k8s/configmap.example.yaml`
   - `k8s/deployment.yaml`
   - `k8s/secret.example.yaml`
 - K8s Deployment 资源名固定为 `clawman`（见 `k8s/deployment.yaml`）。
+- 配置分层守则：
+  - 非敏感配置进入 `ConfigMap` / GitHub `vars`
+  - 敏感凭据进入 `Secret` / GitHub `secrets`
+  - Claude 运行时统一只使用 `ANTHROPIC_API_KEY` 与 `ANTHROPIC_BASE_URL`
 - GitHub Actions 已拆分为两个 workflow：
   1. `Build`（`.github/workflows/build.yml`）：
      - 触发：`push` / `pull_request` / `workflow_dispatch`
@@ -66,12 +72,20 @@
   - `TS_OAUTH_CLIENT_ID`：Tailscale OAuth client ID（建议最小权限并限制 tag，如 `tag:ci`）。
   - `TS_OAUTH_SECRET`：Tailscale OAuth client secret。
   - `KUBE_CONFIG`：Kubernetes kubeconfig 内容（apiserver 必须是 tailnet 可达地址，且包含 `default` context）。
-  - `WECOM_CORP_ID`（必需）
   - `WECOM_CORP_SECRET`（必需）
   - `WECOM_RSA_PRIVATE_KEY`（必需）
-  - `REDIS_ADDR`（可选，默认 `redis:6379`）
   - `REDIS_PASSWORD`（可选）
+  - `ANTHROPIC_API_KEY`（必需，除非改为使用 `CLAUDE_CODE_OAUTH_TOKEN`）
+  - `WORKTOOL_ROBOT_ID`（如启用 WorkTool egress）
+- 需要在 GitHub 仓库 variables 中配置：
+  - `WECOM_CORP_ID`（必需）
+  - `REDIS_ADDR`（可选，默认 `redis:6379`）
   - `WECOM_SEQ_KEY`（可选，默认 `msg:seq`）
+  - `WECOM_BOT_ID`（可选，但建议配置以过滤 bot 自发私聊消息）
+  - `SANDBOX_ENABLED`（可选，默认 `true`）
+  - `SANDBOX_NAMESPACE`（可选，默认 `claw`）
+  - `SANDBOX_IMAGE`（可选，默认 `ghcr.io/<owner>/tinyclaw-agent:<sha>`）
+  - `ANTHROPIC_BASE_URL`（可选，默认 `https://api.anthropic.com`）
 - 目前仓库内默认值：
   - `REDIS_ADDR=redis:6379`
   - `WECOM_SEQ_KEY=msg:seq`

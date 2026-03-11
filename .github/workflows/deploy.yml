@@ -54,24 +54,24 @@ jobs:
       - name: Apply RBAC
         run: kubectl apply -f k8s/rbac.yaml
 
-      - name: Apply runtime secret
+      - name: Apply runtime config
         env:
           DEFAULT_IMAGE_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           MANUAL_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || '' }}
-          REDIS_ADDR: ${{ secrets.REDIS_ADDR }}
+          REDIS_ADDR: ${{ vars.REDIS_ADDR }}
+          WECOM_CORP_ID: ${{ vars.WECOM_CORP_ID }}
+          WECOM_SEQ_KEY: ${{ vars.WECOM_SEQ_KEY }}
+          WECOM_BOT_ID: ${{ vars.WECOM_BOT_ID }}
+          SANDBOX_ENABLED: ${{ vars.SANDBOX_ENABLED }}
+          SANDBOX_NAMESPACE: ${{ vars.SANDBOX_NAMESPACE }}
+          SANDBOX_IMAGE: ${{ vars.SANDBOX_IMAGE }}
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-          WECOM_CORP_ID: ${{ secrets.WECOM_CORP_ID }}
           WECOM_CORP_SECRET: ${{ secrets.WECOM_CORP_SECRET }}
           WECOM_RSA_PRIVATE_KEY: ${{ secrets.WECOM_RSA_PRIVATE_KEY }}
-          WECOM_SEQ_KEY: ${{ secrets.WECOM_SEQ_KEY }}
           WECOM_CONTACT_SECRET: ${{ secrets.WECOM_CONTACT_SECRET }}
-          WECOM_BOT_ID: ${{ secrets.WECOM_BOT_ID }}
           WORKTOOL_ROBOT_ID: ${{ secrets.WORKTOOL_ROBOT_ID }}
-          SANDBOX_ENABLED: ${{ secrets.SANDBOX_ENABLED }}
-          SANDBOX_NAMESPACE: ${{ secrets.SANDBOX_NAMESPACE }}
-          SANDBOX_IMAGE: ${{ secrets.SANDBOX_IMAGE }}
-          MODEL_API_BASE_URL: ${{ secrets.MODEL_API_BASE_URL }}
-          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           IMAGE_TAG="${MANUAL_IMAGE_TAG:-$DEFAULT_IMAGE_TAG}"
           : "${REDIS_ADDR:=redis:6379}"
@@ -79,21 +79,24 @@ jobs:
           : "${SANDBOX_ENABLED:=true}"
           : "${SANDBOX_NAMESPACE:=claw}"
           : "${SANDBOX_IMAGE:=ghcr.io/${{ github.repository_owner }}/tinyclaw-agent:${IMAGE_TAG}}"
-          kubectl -n claw create secret generic tinyclaw-env \
+          : "${ANTHROPIC_BASE_URL:=https://api.anthropic.com}"
+          kubectl -n claw create configmap tinyclaw-config \
             --from-literal=REDIS_ADDR="${REDIS_ADDR}" \
-            --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD}" \
             --from-literal=WECOM_CORP_ID="${WECOM_CORP_ID}" \
-            --from-literal=WECOM_CORP_SECRET="${WECOM_CORP_SECRET}" \
-            --from-literal=WECOM_RSA_PRIVATE_KEY="${WECOM_RSA_PRIVATE_KEY}" \
             --from-literal=WECOM_SEQ_KEY="${WECOM_SEQ_KEY}" \
-            --from-literal=WECOM_CONTACT_SECRET="${WECOM_CONTACT_SECRET}" \
             --from-literal=WECOM_BOT_ID="${WECOM_BOT_ID}" \
-            --from-literal=WORKTOOL_ROBOT_ID="${WORKTOOL_ROBOT_ID}" \
             --from-literal=SANDBOX_ENABLED="${SANDBOX_ENABLED}" \
             --from-literal=SANDBOX_NAMESPACE="${SANDBOX_NAMESPACE}" \
             --from-literal=SANDBOX_IMAGE="${SANDBOX_IMAGE}" \
-            --from-literal=MODEL_API_BASE_URL="${MODEL_API_BASE_URL}" \
-            --from-literal=MODEL_API_KEY="${MODEL_API_KEY}" \
+            --from-literal=ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n claw create secret generic tinyclaw-secret \
+            --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD}" \
+            --from-literal=WECOM_CORP_SECRET="${WECOM_CORP_SECRET}" \
+            --from-literal=WECOM_RSA_PRIVATE_KEY="${WECOM_RSA_PRIVATE_KEY}" \
+            --from-literal=WECOM_CONTACT_SECRET="${WECOM_CONTACT_SECRET}" \
+            --from-literal=WORKTOOL_ROBOT_ID="${WORKTOOL_ROBOT_ID}" \
+            --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Apply deployment

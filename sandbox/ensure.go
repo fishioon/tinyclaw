@@ -157,8 +157,8 @@ func buildSandbox(name string, cfg Config, roomID, tenantID, chatType string, cr
 								{Name: "REDIS_ADDR", Value: cfg.RedisAddr},
 								{Name: "REDIS_USERNAME", Value: cred.Username},
 								{Name: "REDIS_PASSWORD", Value: cred.Password},
-								{Name: "MODEL_API_BASE_URL", Value: cfg.ModelAPIBaseURL},
-								{Name: "MODEL_API_KEY", Value: cfg.ModelAPIKey},
+								{Name: "ANTHROPIC_BASE_URL", Value: cfg.ModelAPIBaseURL},
+								{Name: "ANTHROPIC_API_KEY", Value: cfg.ModelAPIKey},
 							},
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{

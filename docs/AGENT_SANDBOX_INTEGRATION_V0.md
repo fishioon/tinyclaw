@@ -130,6 +130,7 @@ AGENT_TMPDIR             # 默认 /tmp
 ```
 
 说明：
+- 配置守则：Claude 相关配置统一使用 `ANTHROPIC_API_KEY` 和 `ANTHROPIC_BASE_URL`，默认不兼容 `MODEL_API_*` 别名。
 - 当前实现固定使用：
   - ingress stream: `stream:i:{ROOM_ID}`
   - egress stream: `stream:o:{ROOM_ID}`

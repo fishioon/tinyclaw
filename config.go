@@ -62,8 +62,8 @@ func LoadConfig() (Config, error) {
 
 		WorkToolRobotID: os.Getenv("WORKTOOL_ROBOT_ID"),
 
-		ModelAPIBaseURL: os.Getenv("MODEL_API_BASE_URL"),
-		ModelAPIKey:     os.Getenv("MODEL_API_KEY"),
+		ModelAPIBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
+		ModelAPIKey:     os.Getenv("ANTHROPIC_API_KEY"),
 	}
 
 	return cfg, nil

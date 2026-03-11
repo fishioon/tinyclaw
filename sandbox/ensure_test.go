@@ -93,8 +93,8 @@ func TestEnsure_CreatesSandbox(t *testing.T) {
 		"REDIS_ADDR":         "redis:6379",
 		"REDIS_USERNAME":     "sb:test-room-123",
 		"REDIS_PASSWORD":     "test-password",
-		"MODEL_API_BASE_URL": "http://llm:4000",
-		"MODEL_API_KEY":      "sk-test",
+		"ANTHROPIC_BASE_URL": "http://llm:4000",
+		"ANTHROPIC_API_KEY":  "sk-test",
 	}
 	for k, v := range wantEnv {
 		if envMap[k] != v {

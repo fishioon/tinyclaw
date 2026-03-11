@@ -83,14 +83,8 @@ export function loadEnv(): AgentEnv {
     redisDb: parseInteger('REDIS_DB', 0),
     consumerGroupPrefix,
     consumerName: process.env.CONSUMER_NAME?.trim() || os.hostname(),
-    anthropicApiKey:
-      process.env.ANTHROPIC_API_KEY?.trim() ||
-      process.env.MODEL_API_KEY?.trim() ||
-      undefined,
-    anthropicBaseUrl:
-      process.env.ANTHROPIC_BASE_URL?.trim() ||
-      process.env.MODEL_API_BASE_URL?.trim() ||
-      undefined,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || undefined,
+    anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL?.trim() || undefined,
     claudeCodeOauthToken:
       process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim() || undefined,
     agentIdleAfterSec: parseInteger('AGENT_IDLE_AFTER_SEC', 300),
