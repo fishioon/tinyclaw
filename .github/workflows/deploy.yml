@@ -60,6 +60,7 @@ jobs:
           MANUAL_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || '' }}
           REDIS_ADDR: ${{ vars.REDIS_ADDR }}
           WECOM_CORP_ID: ${{ vars.WECOM_CORP_ID }}
+          WECOM_BOT_ID: ${{ vars.WECOM_BOT_ID }}
           ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           WECOM_CORP_SECRET: ${{ secrets.WECOM_CORP_SECRET }}
