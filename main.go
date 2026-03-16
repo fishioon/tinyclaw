@@ -27,14 +27,6 @@ func main() {
 	if cfg.WeComBotID == "" {
 		slog.Warn("WECOM_BOT_ID is empty; bot-sent direct messages will be ingested as room_id=<bot_id> and may create self-loop sandboxes")
 	}
-	if cfg.SandboxTemplateName == "" {
-		slog.Error("SANDBOX_TEMPLATE_NAME is required")
-		os.Exit(1)
-	}
-	if cfg.SandboxRouterURL == "" {
-		slog.Error("SANDBOX_ROUTER_URL is required")
-		os.Exit(1)
-	}
 
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     cfg.RedisAddr,

@@ -28,7 +28,7 @@
    - 使用 `lock:ensure:{room_id}` 抑制 ensure 风暴。
 
 3. `Agent Runtime (in Sandbox)`
-   - 暴露 `GET /healthz` 与 `POST /v1/chat`。
+   - 暴露 `GET /healthz`、`POST /agent` 与标准 `/execute`、`/upload`、`/download`、`/list`、`/exists`。
    - 调用 Claude runtime 或 echo runtime。
    - 管理本地工作目录与临时文件，不直接读写 Redis ingress。
 
@@ -107,7 +107,7 @@ http://sandbox-router-svc.claw.svc.cluster.local:8080
 请求：
 
 ```http
-POST /v1/chat
+POST /agent
 X-Sandbox-ID: clawagent-room-123
 X-Sandbox-Namespace: claw
 X-Sandbox-Port: 8888
@@ -118,11 +118,11 @@ Content-Type: application/json
 
 ```json
 {
+  "query": "hello",
   "msgid": "wecom_msg_abc",
   "room_id": "room-123",
   "tenant_id": "corp-id",
-  "chat_type": "group",
-  "text": "hello"
+  "chat_type": "group"
 }
 ```
 
@@ -130,10 +130,9 @@ Content-Type: application/json
 
 ```json
 {
-  "text": "agent reply",
-  "metadata": {
-    "runtime_mode": "claude_agent_sdk"
-  }
+  "stdout": "agent reply",
+  "stderr": "",
+  "exit_code": 0
 }
 ```
 
@@ -220,7 +219,7 @@ agent 容器 ready 条件：
 1. Ingress 拉到企业微信消息并标准化。
 2. 根据 `room_id` 调用 `ensure(room_id)`。
 3. Orchestrator create-or-get `SandboxClaim`。
-4. `SandboxClaim` ready 后，主服务通过 router 调用 `/v1/chat`。
+4. `SandboxClaim` ready 后，主服务通过 router 调用 `/agent`。
 5. agent 返回回复。
 6. 主服务写入 `stream:o:{room_id}`。
 7. egress consumer 统一回发企业微信。
@@ -228,7 +227,7 @@ agent 容器 ready 条件：
 ### 9.2 活跃会话
 1. 新消息到达。
 2. 主服务直接复用现有 `SandboxClaim`。
-3. 通过 router 再次调用 `/v1/chat`。
+3. 通过 router 再次调用 `/agent`。
 4. 不再等待 Redis ingress 被 sandbox 消费。
 
 ## 10. 失败处理

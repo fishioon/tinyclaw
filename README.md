@@ -10,12 +10,12 @@ TinyClaw 当前已经切到官方 `agent-sandbox` 资源与通信模型：
 - `clawman` 从企业微信会话存档拉取消息、解密并标准化。
 - 按 `room_id` 调用 `ensure(room_id)`，通过 `SandboxClaim` 确保对应 sandbox 已就绪。
 - 主服务通过 `sandbox-router` 向 sandbox 内 `agent` 发送 HTTP 请求，不再让 sandbox 自拉 Redis ingress。
-- `agent` 在 sandbox 内提供 `/healthz` 与 `/v1/chat` HTTP 接口，内部使用 `claude_agent_sdk` 或 `echo` runtime 执行。
+- `agent` 在 sandbox 内提供 `/healthz`、`/agent`、`/execute`、`/upload`、`/download`、`/list`、`/exists` 等官方风格 HTTP 接口，内部使用 `claude_agent_sdk` 或 `echo` runtime 执行。
 - sandbox 返回回复后，主服务写入 `stream:o:{room_id}`，再由 egress consumer 统一回发企业微信。
 
 ## Agent Scaffold
 - `agent/`：独立的 TypeScript agent 子工程，当前提供：
-  - HTTP runtime server（`/healthz`、`/v1/chat`）
+  - HTTP runtime server（`/healthz`、`/agent`、`/execute`、`/upload`、`/download`、`/list`、`/exists`）
   - `echo` 与 `claude_agent_sdk` 两种运行模式
   - `tini + entrypoint.sh` 进程模型
   - 本地/CI 可运行的 HTTP 集成测试与 live smoke
@@ -61,7 +61,8 @@ TinyClaw 当前已经切到官方 `agent-sandbox` 资源与通信模型：
   - `k8s/rbac.yaml`
   - `k8s/deployment.yaml`
   - `k8s/redis.yaml`
-  - `k8s/sandboxtemplate.example.yaml`
+  - `k8s/sandbox-router.yaml`
+  - `k8s/sandboxtemplate.yaml`
 - K8s Deployment 资源名固定为 `clawman`（见 `k8s/deployment.yaml`）。
 - 主服务需要集群内已部署：
   - agent-sandbox core controller
@@ -83,6 +84,12 @@ TinyClaw 当前已经切到官方 `agent-sandbox` 资源与通信模型：
 - `SANDBOX_TEMPLATE_NAME`
 - `SANDBOX_ROUTER_URL`
 - `SANDBOX_SERVER_PORT`
+
+默认值：
+- `SANDBOX_NAMESPACE=claw`
+- `SANDBOX_TEMPLATE_NAME=tinyclaw-agent-template`
+- `SANDBOX_ROUTER_URL=http://sandbox-router-svc.{namespace}.svc.cluster.local:8080`
+- `SANDBOX_SERVER_PORT=8888`
 
 agent 运行时关键配置：
 - `AGENT_SERVER_PORT`
@@ -107,6 +114,8 @@ agent 运行时关键配置：
   - `REDIS_ADDR`
   - `WECOM_BOT_ID`
   - `ANTHROPIC_BASE_URL`
+- 可选覆盖的 GitHub variables：
+  - `WECOM_SEQ_KEY`
   - `SANDBOX_TEMPLATE_NAME`
   - `SANDBOX_ROUTER_URL`
   - `SANDBOX_SERVER_PORT`

@@ -59,7 +59,7 @@ process.loadEnvFile(path.resolve(process.cwd(), '../.env'));
 const liveTest = SHOULD_RUN ? test : test.skip;
 
 liveTest(
-  'claude_agent_sdk live smoke serves HTTP chat responses',
+  'claude_agent_sdk live smoke serves /agent responses',
   { timeout: TEST_TIMEOUT_MS },
   async () => {
     assert.ok(
@@ -99,23 +99,24 @@ liveTest(
         10_000,
       );
 
-      const response = await fetch(`http://127.0.0.1:${port}/v1/chat`, {
+      const response = await fetch(`http://127.0.0.1:${port}/agent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          query: 'Reply with the exact text: tinyclaw-live-ok',
           msgid: 'msg-live-smoke-1',
           room_id: 'room-live',
           tenant_id: 'tenant-live',
           chat_type: 'group',
-          text: 'Reply with the exact text: tinyclaw-live-ok',
         }),
       });
 
       assert.equal(response.status, 200);
       const payload = await response.json();
-      assert.match(payload.text, /tinyclaw-live-ok/);
+      assert.equal(payload.exit_code, 0);
+      assert.match(payload.stdout, /tinyclaw-live-ok/);
     } finally {
       await stopProcess(agent);
     }

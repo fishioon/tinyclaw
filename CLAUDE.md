@@ -10,7 +10,7 @@ Current architecture:
 - `clawman` pulls encrypted messages from the WeChat Work Finance SDK.
 - `clawman` ensures a per-room `SandboxClaim` using the official `agent-sandbox` extensions API.
 - `clawman` invokes the sandbox through `sandbox-router` over HTTP.
-- The sandboxed `agent` exposes `/healthz` and `/v1/chat`.
+- The sandboxed `agent` exposes `/healthz`, `/agent`, `/execute`, and the standard file APIs.
 - Replies are written to `stream:o:{room_id}` and sent out by the egress consumer.
 
 ## Build & Run
@@ -38,7 +38,7 @@ WeChat Work Finance SDK
   -> Clawman (poll / decrypt / normalize)
   -> SandboxClaim ensure
   -> sandbox-router
-  -> agent HTTP runtime (/v1/chat)
+  -> agent HTTP runtime (/agent)
   -> Redis egress stream
   -> WorkTool / WeCom send
 ```
@@ -49,7 +49,7 @@ Key files:
 - `sandbox/ensure.go` — `SandboxClaim` create-or-get + ready wait
 - `sandbox/router.go` — router HTTP client
 - `agent/src/main.ts` — sandbox HTTP runtime entry
-- `agent/src/server.ts` — `/healthz` and `/v1/chat`
+- `agent/src/server.ts` — `/healthz`, `/agent`, `/execute`, `/upload`, `/download`, `/list`, `/exists`
 - `agent/src/runtime.ts` — echo / `claude_agent_sdk`
 
 ## Redis key conventions

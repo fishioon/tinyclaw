@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import fs from 'node:fs/promises';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -51,14 +53,16 @@ async function stopProcess(child) {
   ]);
 }
 
-test('agent serves HTTP chat requests in echo mode', async () => {
+test('agent serves official sandbox runtime endpoints in echo mode', async () => {
   const port = await getFreePort();
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), 'tinyclaw-agent-'));
   const agent = spawn('node', [path.resolve('dist/main.js')], {
     cwd: path.resolve('.'),
     env: {
       ...process.env,
       AGENT_SERVER_PORT: String(port),
       AGENT_RUNTIME_MODE: 'echo',
+      AGENT_WORKDIR: workdir,
       AGENT_LOAD_DOTENV: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -86,25 +90,71 @@ test('agent serves HTTP chat requests in echo mode', async () => {
     const health = await fetch(`http://127.0.0.1:${port}/healthz`);
     assert.equal(health.status, 200);
 
-    const response = await fetch(`http://127.0.0.1:${port}/v1/chat`, {
+    const agentResponse = await fetch(`http://127.0.0.1:${port}/agent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        query: 'hello integration',
         msgid: 'msg-integration-1',
         room_id: 'room-integration',
         tenant_id: 'tenant-integration',
         chat_type: 'group',
-        text: 'hello integration',
       }),
     });
 
-    assert.equal(response.status, 200);
-    const payload = await response.json();
-    assert.equal(payload.text, 'Echo from tinyclaw-agent: hello integration');
-    assert.equal(payload.metadata.runtime_mode, 'echo');
+    assert.equal(agentResponse.status, 200);
+    assert.deepEqual(await agentResponse.json(), {
+      stdout: 'Echo from tinyclaw-agent: hello integration',
+      stderr: '',
+      exit_code: 0,
+    });
+
+    const executeResponse = await fetch(`http://127.0.0.1:${port}/execute`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        command: 'printf tinyclaw-execute-ok',
+      }),
+    });
+
+    assert.equal(executeResponse.status, 200);
+    assert.deepEqual(await executeResponse.json(), {
+      stdout: 'tinyclaw-execute-ok',
+      stderr: '',
+      exit_code: 0,
+    });
+
+    const uploadForm = new FormData();
+    uploadForm.append('file', new Blob(['hello file']), 'note.txt');
+    const uploadResponse = await fetch(`http://127.0.0.1:${port}/upload`, {
+      method: 'POST',
+      body: uploadForm,
+    });
+    assert.equal(uploadResponse.status, 200);
+
+    const existsResponse = await fetch(`http://127.0.0.1:${port}/exists/note.txt`);
+    assert.equal(existsResponse.status, 200);
+    assert.deepEqual(await existsResponse.json(), {
+      path: 'note.txt',
+      exists: true,
+    });
+
+    const listResponse = await fetch(`http://127.0.0.1:${port}/list/.`);
+    assert.equal(listResponse.status, 200);
+    const listPayload = await listResponse.json();
+    assert.equal(listPayload.length, 1);
+    assert.equal(listPayload[0].name, 'note.txt');
+    assert.equal(listPayload[0].type, 'file');
+
+    const downloadResponse = await fetch(`http://127.0.0.1:${port}/download/note.txt`);
+    assert.equal(downloadResponse.status, 200);
+    assert.equal(await downloadResponse.text(), 'hello file');
   } finally {
     await stopProcess(agent);
+    await fs.rm(workdir, { recursive: true, force: true });
   }
 });

@@ -25,17 +25,18 @@ type RouterClient struct {
 	httpClient *http.Client
 }
 
-type ChatRequest struct {
+type AgentRequest struct {
+	Query    string `json:"query"`
 	MsgID    string `json:"msgid"`
 	RoomID   string `json:"room_id"`
 	TenantID string `json:"tenant_id"`
 	ChatType string `json:"chat_type"`
-	Text     string `json:"text"`
 }
 
-type ChatResponse struct {
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+type ExecutionResult struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
 }
 
 func NewRouterClient(httpClient *http.Client, cfg RouterConfig) *RouterClient {
@@ -54,27 +55,27 @@ func NewRouterClient(httpClient *http.Client, cfg RouterConfig) *RouterClient {
 	}
 }
 
-func (c *RouterClient) Invoke(ctx context.Context, sandboxID string, req ChatRequest) (ChatResponse, error) {
+func (c *RouterClient) Invoke(ctx context.Context, sandboxID string, req AgentRequest) (ExecutionResult, error) {
 	if sandboxID == "" {
-		return ChatResponse{}, fmt.Errorf("sandboxID is required")
+		return ExecutionResult{}, fmt.Errorf("sandboxID is required")
 	}
 	if c.baseURL == "" {
-		return ChatResponse{}, fmt.Errorf("router base URL is required")
+		return ExecutionResult{}, fmt.Errorf("router base URL is required")
 	}
 
 	payload, err := json.Marshal(req)
 	if err != nil {
-		return ChatResponse{}, fmt.Errorf("marshal chat request: %w", err)
+		return ExecutionResult{}, fmt.Errorf("marshal agent request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		c.baseURL+"/v1/chat",
+		c.baseURL+"/agent",
 		bytes.NewReader(payload),
 	)
 	if err != nil {
-		return ChatResponse{}, fmt.Errorf("build router request: %w", err)
+		return ExecutionResult{}, fmt.Errorf("build router request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Sandbox-ID", sandboxID)
@@ -83,24 +84,34 @@ func (c *RouterClient) Invoke(ctx context.Context, sandboxID string, req ChatReq
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return ChatResponse{}, fmt.Errorf("call sandbox router: %w", err)
+		return ExecutionResult{}, fmt.Errorf("call sandbox router: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return ChatResponse{}, fmt.Errorf("read sandbox response: %w", err)
+		return ExecutionResult{}, fmt.Errorf("read sandbox response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return ChatResponse{}, fmt.Errorf("sandbox router returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return ExecutionResult{}, fmt.Errorf("sandbox router returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	var result ChatResponse
+	var result ExecutionResult
 	if err := json.Unmarshal(body, &result); err != nil {
-		return ChatResponse{}, fmt.Errorf("decode sandbox response: %w", err)
+		return ExecutionResult{}, fmt.Errorf("decode sandbox response: %w", err)
 	}
-	if strings.TrimSpace(result.Text) == "" {
-		return ChatResponse{}, fmt.Errorf("sandbox response text is empty")
+	if result.ExitCode != 0 {
+		errText := strings.TrimSpace(result.Stderr)
+		if errText == "" {
+			errText = strings.TrimSpace(result.Stdout)
+		}
+		if errText == "" {
+			errText = "unknown agent runtime failure"
+		}
+		return ExecutionResult{}, fmt.Errorf("sandbox agent failed with exit_code=%d: %s", result.ExitCode, errText)
+	}
+	if strings.TrimSpace(result.Stdout) == "" {
+		return ExecutionResult{}, fmt.Errorf("sandbox response stdout is empty")
 	}
 
 	return result, nil

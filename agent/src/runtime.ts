@@ -5,14 +5,14 @@ import { fileURLToPath } from 'node:url';
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
-import type { AgentChatRequest, AgentEnv, RuntimeResult } from './types.js';
+import type { AgentEnv, AgentRequest, ExecutionResult } from './types.js';
 
 const require = createRequire(import.meta.url);
 const runtimeDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(runtimeDir, '..');
 
 export interface AgentRuntime {
-  run(message: AgentChatRequest): Promise<RuntimeResult>;
+  run(message: AgentRequest): Promise<ExecutionResult>;
 }
 
 type ClaudeQuery = ReturnType<typeof query>;
@@ -28,17 +28,16 @@ const runtimeDeps: RuntimeDeps = {
 };
 
 class EchoRuntime implements AgentRuntime {
-  async run(message: AgentChatRequest): Promise<RuntimeResult> {
+  async run(message: AgentRequest): Promise<ExecutionResult> {
     return {
-      text: `Echo from tinyclaw-agent: ${message.text}`,
-      metadata: {
-        runtime_mode: 'echo',
-      },
+      stdout: `Echo from tinyclaw-agent: ${message.query}`,
+      stderr: '',
+      exit_code: 0,
     };
   }
 }
 
-function buildClaudePrompt(message: AgentChatRequest): string {
+function buildClaudePrompt(message: AgentRequest): string {
   const lines = [
     'You are handling a TinyClaw room message.',
     `room_id: ${message.roomId}`,
@@ -47,7 +46,7 @@ function buildClaudePrompt(message: AgentChatRequest): string {
     `msgid: ${message.msgid}`,
   ];
 
-  lines.push('', 'User message:', message.text);
+  lines.push('', 'User message:', message.query);
   return lines.join('\n');
 }
 
@@ -100,7 +99,7 @@ export class ClaudeAgentSdkRuntime implements AgentRuntime {
     private readonly deps: RuntimeDeps = runtimeDeps,
   ) {}
 
-  async run(message: AgentChatRequest): Promise<RuntimeResult> {
+  async run(message: AgentRequest): Promise<ExecutionResult> {
     if (!this.env.anthropicApiKey && !this.env.claudeCodeOauthToken) {
       throw new Error(
         'claude_agent_sdk runtime requires ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN',
@@ -115,7 +114,7 @@ export class ClaudeAgentSdkRuntime implements AgentRuntime {
     const startedAt = this.deps.now();
     const abortController = new AbortController();
     let timedOut = false;
-    let finalResult: RuntimeResult | null = null;
+    let finalResult: ExecutionResult | null = null;
     let finalError: string | null = null;
     let queryHandle: ClaudeQuery | null = null;
     const timeoutHandle = setTimeout(() => {
@@ -180,15 +179,9 @@ export class ClaudeAgentSdkRuntime implements AgentRuntime {
 
         if (sdkMessage.subtype === 'success') {
           finalResult = {
-            text: sdkMessage.result.trim(),
-            metadata: {
-              runtime_mode: 'claude_agent_sdk',
-              model: this.env.claudeModel,
-              session_id: sdkMessage.session_id,
-              sdk_result_uuid: sdkMessage.uuid,
-              total_cost_usd: sdkMessage.total_cost_usd,
-              duration_ms: sdkMessage.duration_ms,
-            },
+            stdout: sdkMessage.result.trim(),
+            stderr: '',
+            exit_code: 0,
           };
           continue;
         }
@@ -207,7 +200,7 @@ export class ClaudeAgentSdkRuntime implements AgentRuntime {
       queryHandle?.close();
     }
 
-    if (finalResult && finalResult.text) {
+    if (finalResult) {
       console.log(
         JSON.stringify({
           level: 'info',

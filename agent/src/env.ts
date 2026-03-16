@@ -79,5 +79,6 @@ export function loadEnv(): AgentEnv {
     claudeAllowedTools: parseCsv(process.env.CLAUDE_ALLOWED_TOOLS?.trim()),
     claudeDisallowedTools: parseCsv(process.env.CLAUDE_DISALLOWED_TOOLS?.trim()),
     claudeMaxTurns: parseInteger('CLAUDE_MAX_TURNS', 16),
+    executeTimeoutMs: parseInteger('AGENT_EXECUTE_TIMEOUT_MS', 120000),
   };
 }

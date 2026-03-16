@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 )
@@ -9,6 +10,7 @@ const (
 	defaultRedisAddr        = "127.0.0.1:6379"
 	defaultWeComSeqKey      = "msg:seq"
 	defaultSandboxNamespace = "claw"
+	defaultSandboxTemplate  = "tinyclaw-agent-template"
 )
 
 type Config struct {
@@ -34,6 +36,11 @@ type Config struct {
 
 func LoadConfig() (Config, error) {
 	redisDB := parseIntEnv("REDIS_DB", 0)
+	sandboxNamespace := envOrDefault("SANDBOX_NAMESPACE", defaultSandboxNamespace)
+	sandboxRouterURL := os.Getenv("SANDBOX_ROUTER_URL")
+	if sandboxRouterURL == "" {
+		sandboxRouterURL = fmt.Sprintf("http://sandbox-router-svc.%s.svc.cluster.local:8080", sandboxNamespace)
+	}
 	cfg := Config{
 		RedisAddr:     envOrDefault("REDIS_ADDR", defaultRedisAddr),
 		RedisPassword: os.Getenv("REDIS_PASSWORD"),
@@ -46,9 +53,9 @@ func LoadConfig() (Config, error) {
 		WeComContactSecret: os.Getenv("WECOM_CONTACT_SECRET"),
 		WeComBotID:         os.Getenv("WECOM_BOT_ID"),
 
-		SandboxNamespace:       envOrDefault("SANDBOX_NAMESPACE", defaultSandboxNamespace),
-		SandboxTemplateName:    os.Getenv("SANDBOX_TEMPLATE_NAME"),
-		SandboxRouterURL:       os.Getenv("SANDBOX_ROUTER_URL"),
+		SandboxNamespace:       sandboxNamespace,
+		SandboxTemplateName:    envOrDefault("SANDBOX_TEMPLATE_NAME", defaultSandboxTemplate),
+		SandboxRouterURL:       sandboxRouterURL,
 		SandboxServerPort:      parseIntEnv("SANDBOX_SERVER_PORT", 8888),
 		SandboxReadyTimeoutSec: parseIntEnv("SANDBOX_READY_TIMEOUT_SEC", 180),
 

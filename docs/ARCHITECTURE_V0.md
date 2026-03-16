@@ -52,7 +52,8 @@ tinyclaw 是一个面向企业微信会话的 AI Agent Runtime：
                               | Sandbox Pod per room                      |
                               | - tinyclaw agent HTTP server              |
                               | - /healthz                                |
-                              | - /v1/chat                                |
+                              | - /agent                                  |
+                              | - /execute /upload /download /list /exists|
                               | - claude_agent_sdk / echo runtime         |
                               +-------------------------------------------+
 ```
@@ -104,7 +105,7 @@ Sandbox.name      = clawagent-{room_id_lower}
 2. 解密并解析消息，过滤非法或 bot 自发消息。
 3. 根据 `room_id` 解析发送方或群详情，写入 Redis 缓存。
 4. 调用 `ensure(room_id)`，等待 `SandboxClaim` ready。
-5. 通过 router 发送 `POST /v1/chat` 到 sandbox。
+5. 通过 router 发送 `POST /agent` 到 sandbox。
 6. 拿到回复后写入 `stream:o:{room_id}`。
 7. egress consumer 统一回发企业微信。
 
@@ -112,7 +113,7 @@ Sandbox.name      = clawagent-{room_id_lower}
 请求路径：
 
 ```text
-POST {SANDBOX_ROUTER_URL}/v1/chat
+POST {SANDBOX_ROUTER_URL}/agent
 ```
 
 请求头：
@@ -124,11 +125,11 @@ POST {SANDBOX_ROUTER_URL}/v1/chat
 
 ```json
 {
+  "query": "用户消息正文",
   "msgid": "wecom_msg_abc",
   "room_id": "chat_123",
   "tenant_id": "corp_id",
-  "chat_type": "group",
-  "text": "用户消息正文"
+  "chat_type": "group"
 }
 ```
 
@@ -136,10 +137,9 @@ POST {SANDBOX_ROUTER_URL}/v1/chat
 
 ```json
 {
-  "text": "agent reply",
-  "metadata": {
-    "runtime_mode": "claude_agent_sdk"
-  }
+  "stdout": "agent reply",
+  "stderr": "",
+  "exit_code": 0
 }
 ```
 
@@ -162,7 +162,12 @@ v0 中 Redis 不再承担 sandbox ingress，保留以下职责：
 ### 6.2 入口契约
 - HTTP:
   - `GET /healthz`
-  - `POST /v1/chat`
+  - `POST /agent`
+  - `POST /execute`
+  - `POST /upload`
+  - `GET /download/{path}`
+  - `GET /list/{path}`
+  - `GET /exists/{path}`
 - 运行目录：
   - `AGENT_WORKDIR`
   - `AGENT_TMPDIR`

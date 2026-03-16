@@ -16,19 +16,26 @@ export interface AgentEnv {
   claudeAllowedTools?: string[];
   claudeDisallowedTools?: string[];
   claudeMaxTurns: number;
+  executeTimeoutMs: number;
 }
 
-export interface AgentChatRequest {
+export interface AgentRequest {
   msgid: string;
   roomId: string;
   tenantId: string;
   chatType: string;
-  text: string;
+  query: string;
 }
 
-export interface RuntimeResult {
-  text: string;
-  metadata?: Record<string, unknown>;
+export interface ExecutionResult {
+  stdout: string;
+  stderr: string;
+  exit_code: number;
 }
 
-export interface AgentChatResponse extends RuntimeResult {}
+export interface FileEntry {
+  name: string;
+  size: number;
+  type: 'file' | 'directory';
+  mod_time: number;
+}

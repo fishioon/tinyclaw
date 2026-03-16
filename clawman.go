@@ -195,18 +195,18 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			return seq, fmt.Errorf("ensure sandbox ready for room %s: %w", roomID, err)
 		}
 
-		reply, err := r.sandboxAPI.Invoke(ctx, sandboxID, sandbox.ChatRequest{
+		reply, err := r.sandboxAPI.Invoke(ctx, sandboxID, sandbox.AgentRequest{
+			Query:    text,
 			MsgID:    msg.MsgID,
 			RoomID:   roomID,
 			TenantID: r.cfg.WeComCorpID,
 			ChatType: chatTypeForRoom(msg.RoomID),
-			Text:     text,
 		})
 		if err != nil {
 			return seq, fmt.Errorf("invoke sandbox %s for room %s: %w", sandboxID, roomID, err)
 		}
 
-		if err := r.enqueueReply(ctx, roomID, msg.MsgID, reply.Text); err != nil {
+		if err := r.enqueueReply(ctx, roomID, msg.MsgID, reply.Stdout); err != nil {
 			return seq, fmt.Errorf("enqueue sandbox reply for room %s: %w", roomID, err)
 		}
 		if err := r.redis.Set(ctx, r.cfg.WeComSeqKey, chatData.Seq, 0).Err(); err != nil {
