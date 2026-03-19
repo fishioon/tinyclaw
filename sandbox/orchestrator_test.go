@@ -57,6 +57,7 @@ func TestInvokeAgentCreatesAndReusesRoomSession(t *testing.T) {
 	orch := NewOrchestrator(Config{
 		Namespace:    "claw",
 		TemplateName: "tinyclaw-agent-template",
+		APIURL:       "http://sandbox-router-svc.claw.svc.cluster.local:8080",
 	})
 	orch.factory = func(ctx context.Context, opts sdksandbox.Options) (sdkHandle, error) {
 		factoryCalls++
@@ -66,8 +67,8 @@ func TestInvokeAgentCreatesAndReusesRoomSession(t *testing.T) {
 		if opts.Namespace != "claw" {
 			t.Fatalf("namespace = %q, want %q", opts.Namespace, "claw")
 		}
-		if opts.APIURL != "" {
-			t.Fatalf("api url = %q, want empty for default port-forward mode", opts.APIURL)
+		if opts.APIURL != "http://sandbox-router-svc.claw.svc.cluster.local:8080" {
+			t.Fatalf("api url = %q", opts.APIURL)
 		}
 		return handle, nil
 	}
@@ -97,6 +98,7 @@ func TestInvokeAgentPropagatesOpenError(t *testing.T) {
 	orch := NewOrchestrator(Config{
 		Namespace:    "claw",
 		TemplateName: "tinyclaw-agent-template",
+		APIURL:       "http://sandbox-router-svc.claw.svc.cluster.local:8080",
 	})
 	orch.factory = func(ctx context.Context, opts sdksandbox.Options) (sdkHandle, error) {
 		return handle, nil
@@ -120,6 +122,7 @@ func TestInvokeAgentRunsEncodedAgentRequest(t *testing.T) {
 	orch := NewOrchestrator(Config{
 		Namespace:    "claw",
 		TemplateName: "tinyclaw-agent-template",
+		APIURL:       "http://sandbox-router-svc.claw.svc.cluster.local:8080",
 		ServerPort:   8888,
 	})
 	orch.factory = func(ctx context.Context, opts sdksandbox.Options) (sdkHandle, error) {
@@ -162,6 +165,7 @@ func TestInvokeAgentPropagatesRunError(t *testing.T) {
 	orch := NewOrchestrator(Config{
 		Namespace:    "claw",
 		TemplateName: "tinyclaw-agent-template",
+		APIURL:       "http://sandbox-router-svc.claw.svc.cluster.local:8080",
 	})
 	orch.factory = func(ctx context.Context, opts sdksandbox.Options) (sdkHandle, error) {
 		return handle, nil
@@ -180,6 +184,7 @@ func TestCloseClosesAllSDKClients(t *testing.T) {
 	orch := NewOrchestrator(Config{
 		Namespace:    "claw",
 		TemplateName: "tinyclaw-agent-template",
+		APIURL:       "http://sandbox-router-svc.claw.svc.cluster.local:8080",
 	})
 	handles := []sdkHandle{handle1, handle2}
 	var next int
