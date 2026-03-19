@@ -16,6 +16,8 @@ type fakeSDKHandle struct {
 	ready      bool
 	sandboxID  string
 	openErr    error
+	openErrs   []error
+	runErrs    []error
 	runResult  *sdksandbox.ExecutionResult
 	runErr     error
 	closeErr   error
@@ -23,6 +25,15 @@ type fakeSDKHandle struct {
 
 func (f *fakeSDKHandle) Open(ctx context.Context) error {
 	f.openCalls++
+	if len(f.openErrs) > 0 {
+		err := f.openErrs[0]
+		f.openErrs = f.openErrs[1:]
+		if err != nil {
+			return err
+		}
+		f.ready = true
+		return nil
+	}
 	if f.openErr != nil {
 		return f.openErr
 	}
@@ -41,7 +52,20 @@ func (f *fakeSDKHandle) IsReady() bool {
 
 func (f *fakeSDKHandle) Run(ctx context.Context, command string, opts ...sdksandbox.CallOption) (*sdksandbox.ExecutionResult, error) {
 	f.runCalls = append(f.runCalls, command)
+	if len(f.runErrs) > 0 {
+		err := f.runErrs[0]
+		f.runErrs = f.runErrs[1:]
+		if err != nil {
+			if errors.Is(err, sdksandbox.ErrNotReady) {
+				f.ready = false
+			}
+			return nil, err
+		}
+	}
 	if f.runErr != nil {
+		if errors.Is(f.runErr, sdksandbox.ErrNotReady) {
+			f.ready = false
+		}
 		return nil, f.runErr
 	}
 	if f.runResult != nil {
@@ -110,6 +134,74 @@ func TestInvokeAgentPropagatesOpenError(t *testing.T) {
 	}
 }
 
+func TestInvokeAgentRecreatesRoomSessionAfterOrphanedClaim(t *testing.T) {
+	orphanedHandle := &fakeSDKHandle{
+		openErr:  sdksandbox.ErrOrphanedClaim,
+		closeErr: nil,
+	}
+	replacementHandle := &fakeSDKHandle{
+		runResult: &sdksandbox.ExecutionResult{
+			Stdout: `{"stdout":"agent reply","stderr":"","exit_code":0}`,
+		},
+	}
+
+	orch := NewOrchestrator(Config{
+		Namespace:    "claw",
+		TemplateName: "tinyclaw-agent-template",
+		APIURL:       "http://sandbox-router-svc.claw.svc.cluster.local:8080",
+	})
+
+	handles := []sdkHandle{orphanedHandle, replacementHandle}
+	var factoryCalls int
+	orch.factory = func(ctx context.Context, opts sdksandbox.Options) (sdkHandle, error) {
+		h := handles[factoryCalls]
+		factoryCalls++
+		return h, nil
+	}
+
+	resp, err := orch.InvokeAgent(context.Background(), "room-1", AgentRequest{Query: "hello"})
+	if err != nil {
+		t.Fatalf("InvokeAgent error: %v", err)
+	}
+	if resp.Stdout != "agent reply" {
+		t.Fatalf("stdout = %q, want %q", resp.Stdout, "agent reply")
+	}
+	if factoryCalls != 2 {
+		t.Fatalf("factory calls = %d, want 2", factoryCalls)
+	}
+	if orphanedHandle.closeCalls != 1 {
+		t.Fatalf("orphaned handle close calls = %d, want 1", orphanedHandle.closeCalls)
+	}
+	if replacementHandle.openCalls != 1 {
+		t.Fatalf("replacement handle open calls = %d, want 1", replacementHandle.openCalls)
+	}
+}
+
+func TestInvokeAgentReturnsCleanupErrorWhenOrphanedClaimCloseFails(t *testing.T) {
+	wantErr := errors.New("delete failed")
+	handle := &fakeSDKHandle{
+		openErr:  sdksandbox.ErrOrphanedClaim,
+		closeErr: wantErr,
+	}
+
+	orch := NewOrchestrator(Config{
+		Namespace:    "claw",
+		TemplateName: "tinyclaw-agent-template",
+		APIURL:       "http://sandbox-router-svc.claw.svc.cluster.local:8080",
+	})
+	orch.factory = func(ctx context.Context, opts sdksandbox.Options) (sdkHandle, error) {
+		return handle, nil
+	}
+
+	_, err := orch.InvokeAgent(context.Background(), "room-1", AgentRequest{Query: "hello"})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("InvokeAgent error = %v, want wrapped %v", err, wantErr)
+	}
+	if handle.closeCalls != 1 {
+		t.Fatalf("close calls = %d, want 1", handle.closeCalls)
+	}
+}
+
 func TestInvokeAgentRunsEncodedAgentRequest(t *testing.T) {
 	handle := &fakeSDKHandle{
 		ready:     true,
@@ -174,6 +266,39 @@ func TestInvokeAgentPropagatesRunError(t *testing.T) {
 	_, err := orch.InvokeAgent(context.Background(), "room-1", AgentRequest{Query: "hello"})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("InvokeAgent error = %v, want wrapped %v", err, wantErr)
+	}
+}
+
+func TestInvokeAgentReopensAfterRunNotReady(t *testing.T) {
+	handle := &fakeSDKHandle{
+		ready:   true,
+		runErrs: []error{sdksandbox.ErrNotReady},
+		runResult: &sdksandbox.ExecutionResult{
+			Stdout: `{"stdout":"agent reply","stderr":"","exit_code":0}`,
+		},
+	}
+
+	orch := NewOrchestrator(Config{
+		Namespace:    "claw",
+		TemplateName: "tinyclaw-agent-template",
+		APIURL:       "http://sandbox-router-svc.claw.svc.cluster.local:8080",
+	})
+	orch.factory = func(ctx context.Context, opts sdksandbox.Options) (sdkHandle, error) {
+		return handle, nil
+	}
+
+	resp, err := orch.InvokeAgent(context.Background(), "room-1", AgentRequest{Query: "hello"})
+	if err != nil {
+		t.Fatalf("InvokeAgent error: %v", err)
+	}
+	if resp.Stdout != "agent reply" {
+		t.Fatalf("stdout = %q, want %q", resp.Stdout, "agent reply")
+	}
+	if handle.openCalls != 1 {
+		t.Fatalf("open calls = %d, want 1", handle.openCalls)
+	}
+	if len(handle.runCalls) != 2 {
+		t.Fatalf("run calls = %d, want 2", len(handle.runCalls))
 	}
 }
 

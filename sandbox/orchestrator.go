@@ -86,7 +86,7 @@ func (o *Orchestrator) InvokeAgent(ctx context.Context, roomID string, req Agent
 	result, err := state.client.Run(ctx, command)
 	if err != nil {
 		if errors.Is(err, sdksandbox.ErrNotReady) && !state.client.IsReady() {
-			if openErr := state.client.Open(ctx); openErr != nil {
+			if openErr := o.openRoomSessionLocked(ctx, roomID, state); openErr != nil {
 				return ExecutionResult{}, fmt.Errorf("re-open sdk sandbox for room %s: %w", roomID, openErr)
 			}
 			result, err = state.client.Run(ctx, command)
@@ -141,28 +141,60 @@ func (o *Orchestrator) getReadyRoomSession(ctx context.Context, roomID string) (
 	defer state.mu.Unlock()
 
 	if state.client == nil {
-		client, err := o.factory(ctx, sdksandbox.Options{
-			TemplateName:        o.cfg.TemplateName,
-			Namespace:           o.cfg.Namespace,
-			APIURL:              o.cfg.APIURL,
-			ServerPort:          o.cfg.ServerPort,
-			SandboxReadyTimeout: o.cfg.ReadyTimeout,
-			RestConfig:          o.cfg.RestConfig,
-			Quiet:               true,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create sdk sandbox for room %s: %w", roomID, err)
+		if err := o.createRoomSessionClientLocked(ctx, roomID, state); err != nil {
+			return nil, err
 		}
-		state.client = client
 	}
 
-	if !state.client.IsReady() {
-		if err := state.client.Open(ctx); err != nil {
-			return nil, fmt.Errorf("open sdk sandbox for room %s: %w", roomID, err)
-		}
+	if err := o.openRoomSessionLocked(ctx, roomID, state); err != nil {
+		return nil, err
 	}
 
 	return state, nil
+}
+
+func (o *Orchestrator) createRoomSessionClientLocked(ctx context.Context, roomID string, state *roomSession) error {
+	client, err := o.factory(ctx, sdksandbox.Options{
+		TemplateName:        o.cfg.TemplateName,
+		Namespace:           o.cfg.Namespace,
+		APIURL:              o.cfg.APIURL,
+		ServerPort:          o.cfg.ServerPort,
+		SandboxReadyTimeout: o.cfg.ReadyTimeout,
+		RestConfig:          o.cfg.RestConfig,
+		Quiet:               true,
+	})
+	if err != nil {
+		return fmt.Errorf("create sdk sandbox for room %s: %w", roomID, err)
+	}
+	state.client = client
+	return nil
+}
+
+func (o *Orchestrator) openRoomSessionLocked(ctx context.Context, roomID string, state *roomSession) error {
+	if state.client == nil {
+		if err := o.createRoomSessionClientLocked(ctx, roomID, state); err != nil {
+			return err
+		}
+	}
+	if state.client.IsReady() {
+		return nil
+	}
+	if err := state.client.Open(ctx); err != nil {
+		if !errors.Is(err, sdksandbox.ErrOrphanedClaim) {
+			return fmt.Errorf("open sdk sandbox for room %s: %w", roomID, err)
+		}
+		if closeErr := state.client.Close(ctx); closeErr != nil {
+			return fmt.Errorf("cleanup orphaned sdk sandbox for room %s: %w", roomID, closeErr)
+		}
+		state.client = nil
+		if err := o.createRoomSessionClientLocked(ctx, roomID, state); err != nil {
+			return err
+		}
+		if err := state.client.Open(ctx); err != nil {
+			return fmt.Errorf("re-open sdk sandbox for room %s after orphan cleanup: %w", roomID, err)
+		}
+	}
+	return nil
 }
 
 func (o *Orchestrator) getOrCreateRoomSession(roomID string) *roomSession {

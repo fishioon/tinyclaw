@@ -166,8 +166,7 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			slog.Warn("skip invalid message without from/tolist", "seq", chatData.Seq, "msgid", chatData.MsgID)
 			continue
 		}
-		// 私聊中忽略 bot 自己发出的消息
-		if msg.RoomID == "" && r.cfg.WeComBotID != "" && msg.From == r.cfg.WeComBotID {
+		if r.shouldSkipArchivedMessage(&msg) {
 			continue
 		}
 		if !r.primeSenderIdentity(ctx, &msg) {
@@ -238,6 +237,16 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 	}
 
 	return seq, nil
+}
+
+func (r *Clawman) shouldSkipArchivedMessage(msg *WeComMessage) bool {
+	if msg == nil {
+		return false
+	}
+	if r.cfg.WeComBotID != "" && msg.From == r.cfg.WeComBotID {
+		return true
+	}
+	return false
 }
 
 func (r *Clawman) primeSenderIdentity(ctx context.Context, msg *WeComMessage) bool {

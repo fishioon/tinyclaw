@@ -215,6 +215,48 @@ func TestPrimeSenderIdentityUsesResolveCache(t *testing.T) {
 	}
 }
 
+func TestShouldSkipArchivedMessageSkipsBotSelfMessageInDirectChat(t *testing.T) {
+	clawman := &Clawman{
+		cfg: Config{
+			WeComBotID: "moss",
+		},
+	}
+
+	if !clawman.shouldSkipArchivedMessage(&WeComMessage{From: "moss"}) {
+		t.Fatal("shouldSkipArchivedMessage = false, want true")
+	}
+}
+
+func TestShouldSkipArchivedMessageSkipsBotSelfMessageInGroupChat(t *testing.T) {
+	clawman := &Clawman{
+		cfg: Config{
+			WeComBotID: "moss",
+		},
+	}
+
+	if !clawman.shouldSkipArchivedMessage(&WeComMessage{
+		From:   "moss",
+		RoomID: "wrg-oKJwAANVxkGsVgVraqwm3SH6GWSw",
+	}) {
+		t.Fatal("shouldSkipArchivedMessage = false, want true")
+	}
+}
+
+func TestShouldSkipArchivedMessageDoesNotSkipHumanGroupMessage(t *testing.T) {
+	clawman := &Clawman{
+		cfg: Config{
+			WeComBotID: "moss",
+		},
+	}
+
+	if clawman.shouldSkipArchivedMessage(&WeComMessage{
+		From:   "wmg-oKJwAAdttdPCnGMd1F5ryrvItWCg",
+		RoomID: "wrg-oKJwAANVxkGsVgVraqwm3SH6GWSw",
+	}) {
+		t.Fatal("shouldSkipArchivedMessage = true, want false")
+	}
+}
+
 func TestPrimeSenderIdentityFailureReturnsFalse(t *testing.T) {
 	var externalCalls int
 
