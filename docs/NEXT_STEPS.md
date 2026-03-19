@@ -3,13 +3,13 @@
 ## MVP 目标
 在企业微信中实现最小可用闭环：
 - Ingress 拉取真实消息并解密。
-- `ensure(room_id)` 通过 `SandboxClaim` 拉起或复用 sandbox。
+- 按 `room_id` 通过官方 Go SDK `Open()` 拉起或复用当前进程内 sandbox session。
 - 主服务通过 `sandbox-router` 调用 sandbox 内 `agent` 的 HTTP 接口。
 - 回复写入 PostgreSQL outbox，由统一 egress 回发企业微信。
 
 ## 第一阶段（已完成）
 1. 明确 `room_id` 规则与主服务职责边界。
-2. 落地 `SandboxClaim` create-or-get + ready wait。
+2. 落地官方 Go SDK `Open()` + direct-url 集成。
 3. 把 `agent` 改成 HTTP runtime，不再自拉 Redis ingress。
 4. 打通主服务到 sandbox 的 router 调用链路。
 
@@ -44,8 +44,7 @@
    - `X-Sandbox-ID`
    - `X-Sandbox-Namespace`
    - `X-Sandbox-Port`
-3. 验证命名约定：
-   - `SandboxClaim.name = clawagent-{room_id_lower}`
+3. 验证 SDK direct-url 模式与 `/agent` 桥接调用行为。
 
 ## PostgreSQL 最小范围（当前版）
 - `ingest_cursors`：企业微信拉取游标
@@ -53,7 +52,7 @@
 - `outbox_deliveries`：egress 待发送、重试中、已发送、失败记录
 
 ## 验收标准
-1. 任意一条企业微信消息可触发对应 `SandboxClaim` ready 并拿到回复。
+1. 任意一条企业微信消息可触发对应 sandbox ready 并拿到回复。
 2. 主服务不再写 `stream:i:{room_id}` 给 sandbox 消费。
 3. sandbox 通信统一经过 router/HTTP，而不是 Redis ingress。
 4. 同一 `room_id` 的 sandbox 标识稳定且可复用。

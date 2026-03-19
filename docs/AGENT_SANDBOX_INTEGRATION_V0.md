@@ -4,8 +4,8 @@
 
 把 `kubernetes-sigs/agent-sandbox` 作为 TinyClaw 的执行层底座，并且对齐官方扩展接口：
 - 用 `SandboxTemplate` 描述统一 agent 运行环境。
-- 用 `SandboxClaim` 按 `room_id` 动态申请和复用 sandbox。
-- 用 `sandbox-router` 将主服务请求转发到 sandbox 内 HTTP runtime。
+- 用官方 Go SDK 管理 `SandboxClaim` 生命周期与 router 连接。
+- 用 `sandbox-router` 作为 SDK direct-url 模式的入口。
 - 不再使用“sandbox 自拉 Redis ingress”的旧链路。
 
 非目标：
@@ -18,14 +18,14 @@
 
 1. `Ingress Service`
    - 拉取企业微信消息并标准化。
-   - 调用 `ensure(room_id)`，保证对应 `SandboxClaim` ready。
-   - 通过 router 调用 sandbox 内 HTTP runtime。
+   - 调用 SDK `Open()`，保证对应 sandbox ready。
+   - 通过 SDK `Run()` 在 sandbox 内桥接调用 HTTP runtime `/agent`。
    - 将成功处理的入站消息、出站消息和 outbox 记录写入 PostgreSQL，由统一回发服务处理。
 
 2. `Sandbox Orchestrator`
-   - 调用 extensions client 创建或查询 `SandboxClaim`。
-   - 以 `SandboxClaim Ready=True` 作为可调用条件。
-   - 当前版使用单副本进程内 debounce 抑制重复 create。
+   - 调用官方 Go SDK 创建 room 级 sandbox session。
+   - 以 SDK `Open()` 完成 claim ready 与连接建立作为可调用条件。
+   - 当前版按 `room_id` 在进程内缓存已打开的 sandbox session。
 
 3. `Agent Runtime (in Sandbox)`
    - 暴露 `GET /healthz`、`POST /agent` 与标准 `/execute`、`/upload`、`/download`、`/list`、`/exists`。
@@ -34,12 +34,11 @@
 
 ## 3. 资源映射
 
-命名规范：
+当前约定：
 
 ```text
 SandboxTemplate.name = tinyclaw-agent-template
-SandboxClaim.name    = clawagent-{room_id_lower}
-Sandbox.name         = clawagent-{room_id_lower}
+room_id             -> process-local SDK client
 ```
 
 标签建议：
@@ -51,8 +50,8 @@ labels:
 ```
 
 说明：
-- `SandboxClaim` 与底层 `Sandbox` 同名，方便 router 直接按 claim 名路由。
-- v0 不单独维护 `room_runtime` 表。
+- 当前官方 Go SDK 不支持由业务层指定确定性 `SandboxClaim.name`。
+- v0 不单独维护 `room_runtime` 表，因此 room 级复用先收敛在单进程生命周期内。
 
 ## 4. 控制面契约
 
@@ -73,13 +72,13 @@ labels:
 - `AGENT_WORKDIR=/workspace`
 
 ### 4.2 SandboxClaim
-主服务按 `room_id` create-or-get：
+官方 Go SDK 在 `Open()` 内部创建 claim：
 
 ```yaml
 apiVersion: extensions.agents.x-k8s.io/v1alpha1
 kind: SandboxClaim
 metadata:
-  name: clawagent-room-123
+  name: sandbox-claim-<sdk-generated>
 spec:
   sandboxTemplateRef:
     name: tinyclaw-agent-template
@@ -89,28 +88,27 @@ ready 判定：
 - `status.conditions[type=Ready].status == True`
 
 ### 4.3 Router
-主服务需要一个固定 router 地址，例如：
+SDK direct-url 模式需要一个固定 router 地址，例如：
 
 ```text
 http://sandbox-router-svc.claw.svc.cluster.local:8080
 ```
 
-转发头：
-- `X-Sandbox-ID`
-- `X-Sandbox-Namespace`
-- `X-Sandbox-Port`
+具体 `X-Sandbox-*` 头由官方 Go SDK 内部注入，业务层不再直接拼装。
 
 ## 5. 数据面契约
 
 ### 5.1 主服务 -> sandbox
 
-请求：
+当前实现不是主服务直接调用 router `/agent`，而是：
+1. SDK 调用 router `/execute`
+2. sandbox 在本机执行 `curl http://127.0.0.1:8888/agent`
+3. `/agent` 返回的 JSON 再透传回主服务
+
+`/agent` 的请求体保持：
 
 ```http
-POST /agent
-X-Sandbox-ID: clawagent-room-123
-X-Sandbox-Namespace: claw
-X-Sandbox-Port: 8888
+POST http://127.0.0.1:8888/agent
 Content-Type: application/json
 ```
 
@@ -217,17 +215,17 @@ agent 容器 ready 条件：
 
 ### 9.1 首条消息
 1. Ingress 拉到企业微信消息并标准化。
-2. 根据 `room_id` 调用 `ensure(room_id)`。
-3. Orchestrator create-or-get `SandboxClaim`。
-4. `SandboxClaim` ready 后，主服务通过 router 调用 `/agent`。
+2. 根据 `room_id` 获取或创建当前进程内 sandbox session。
+3. Orchestrator 创建或复用对应 room 的 SDK client。
+4. SDK `Open()` 完成后，通过 `/execute` 桥接调用 `/agent`。
 5. agent 返回回复。
 6. 主服务写入 PostgreSQL `messages` 与 `outbox_deliveries`。
 7. egress consumer 统一回发企业微信。
 
 ### 9.2 活跃会话
 1. 新消息到达。
-2. 主服务直接复用现有 `SandboxClaim`。
-3. 通过 router 再次调用 `/agent`。
+2. 主服务直接复用现有 SDK client。
+3. 再次通过 `/execute` 桥接调用 `/agent`。
 4. 不再等待 Redis ingress 被 sandbox 消费。
 
 ## 10. 失败处理

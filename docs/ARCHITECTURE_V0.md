@@ -21,8 +21,8 @@ tinyclaw 是一个面向企业微信会话的 AI Agent Runtime：
 +---------------------------+       +----------------------------------+
 | WeCom Session Archive API |-----> | Ingress Service (clawman)        |
 | WeCom Send API            | <-----| - decrypt / normalize            |
-+---------------------------+       | - ensure SandboxClaim            |
-                                    | - invoke sandbox via router      |
++---------------------------+       | - manage sandbox via Go SDK      |
+                                    | - invoke /agent via SDK Run      |
                                     | - persist messages/outbox        |
                                     +----------------+-----------------+
                                                      |
@@ -71,7 +71,7 @@ room_id = {roomid_or_from}
 - `tenant_id` 与 `chat_type` 作为独立字段保留，用于审计、统计和权限判断。
 
 ### 3.2 隔离策略
-- 控制面隔离：每个 `room_id` 对应一个确定性 `SandboxClaim`。
+- 控制面隔离：每个活跃 `room_id` 在当前进程内持有一个对应的 SDK sandbox handle。
 - 运行时隔离：每个 room 一个 sandbox pod。
 - 文件系统隔离：每个 sandbox 拥有独立 `/workspace`。
 - 网络隔离：由 agent-sandbox 模板和网络策略控制，默认按最小权限配置。
@@ -82,21 +82,21 @@ room_id = {roomid_or_from}
 - `SandboxTemplate`
   - 描述统一的 agent 镜像、端口、探针和运行时环境。
 - `SandboxClaim`
-  - 由主服务按 `room_id` create-or-get。
-  - claim ready 后即可通过 router 访问对应 sandbox。
+  - 由官方 Go SDK 在 `Open()` 时创建并等待 ready。
+  - 当前 SDK 不支持自定义 claim 名称，claim identity 由 SDK 内部生成并保存在进程内 handle。
 - `sandbox-router`
   - 作为统一入口，根据请求头把流量转发到对应 sandbox service。
 
-### 4.2 命名约定
+### 4.2 生命周期约定
 
 ```text
-SandboxClaim.name = clawagent-{room_id_lower}
-Sandbox.name      = clawagent-{room_id_lower}
+room_id -> process-local SDK client
+SDK client.Open() -> create SandboxClaim -> wait Sandbox ready
 ```
 
 说明：
-- claim 与 sandbox 使用同名，便于 router 直接用 `X-Sandbox-ID` 路由。
-- 当前版只在单副本进程内做 ensure debounce。
+- 当前版的 room 复用范围是单进程生命周期。
+- 如果主服务重启，官方 Go SDK 当前不会自动找回旧 claim；后续需评估稳定复用策略。
 
 ## 5. 数据面设计
 
@@ -104,22 +104,17 @@ Sandbox.name      = clawagent-{room_id_lower}
 1. `clawman` 周期拉取企业微信会话存档。
 2. 解密并解析消息，过滤非法或 bot 自发消息。
 3. 根据 `room_id` 解析发送方或群详情，并在进程内做短期 TTL cache。
-4. 调用 `ensure(room_id)`，等待 `SandboxClaim` ready。
-5. 通过 router 发送 `POST /agent` 到 sandbox。
+4. 通过官方 Go SDK `Open()` 确保该 room 的 sandbox session ready。
+5. 通过官方 Go SDK `Run()` 在 sandbox 内部桥接调用本机 `POST /agent`。
 6. 拿到回复后把入站消息、出站消息和 outbox 记录写入 PostgreSQL。
 7. egress consumer 轮询 outbox 并统一回发企业微信。
 
 ### 5.2 Router 调用契约
-请求路径：
+当前主服务不再直接从集群外拼接 router 请求头，而是让官方 Go SDK 用 direct-url 模式连接 router，并通过 `/execute` 在 sandbox 内部调用：
 
 ```text
-POST {SANDBOX_ROUTER_URL}/agent
+POST http://127.0.0.1:{AGENT_SERVER_PORT}/agent
 ```
-
-请求头：
-- `X-Sandbox-ID: clawagent-{room_id_lower}`
-- `X-Sandbox-Namespace: claw`
-- `X-Sandbox-Port: 8888`
 
 请求体最小集：
 
@@ -193,10 +188,10 @@ PID 1: tini / entrypoint
 - 调用 sandbox。
 
 ### 7.2 Sandbox Orchestrator
-- 通过 `SandboxClaim` create-or-get 管理 room sandbox。
-- 等待 claim ready。
+- 通过官方 Go SDK 创建 room 级 sandbox session。
+- 通过 SDK `Open()` 等待 claim ready。
 - 不单独维护 room registry 表。
-- 当前只做单副本进程内 debounce，不引入中心化分布式锁。
+- 当前用进程内 room session cache 复用活跃 sandbox。
 
 ### 7.3 Egress
 - 轮询 `outbox_deliveries`。
@@ -222,7 +217,7 @@ PID 1: tini / entrypoint
 - `egress_retry_count`
 
 ## 10. 结论
-v0 方案的重点已经从“Redis 驱动 sandbox 自拉”切换为“官方 agent-sandbox 控制面 + router 驱动 HTTP 调用 + PostgreSQL 最小事实源”：
+v0 方案的重点已经从“Redis 驱动 sandbox 自拉”切换为“官方 agent-sandbox Go SDK + router/direct-url + PostgreSQL 最小事实源”：
 - 控制面更贴近官方演进方向。
 - 模板复用能力更强。
 - sandbox 不再依赖 per-room Redis 凭据和 consumer group。
