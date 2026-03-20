@@ -144,6 +144,12 @@ func (r *Clawman) Run(ctx context.Context) error {
 	}
 }
 
+// roomContext holds the last triggered message info for a room, used in the dispatch phase.
+type roomContext struct {
+	msg    *WeComMessage
+	sender *Identity
+}
+
 func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64, error) {
 	chatDataList, err := r.sdk.GetChatData(seq, limit)
 	if err != nil {
@@ -157,10 +163,15 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 
 	msgPulled.Add(float64(len(chatDataList)))
 
+	// Phase 1: ingest — decrypt, parse, store inbound, advance cursor.
+	triggeredRooms := map[string]*roomContext{}
+	startSeq := seq
 	for _, chatData := range chatDataList {
 		if ctx.Err() != nil {
 			return seq, ctx.Err()
 		}
+		seq = chatData.Seq
+
 		raw, err := r.sdk.DecryptData(&chatData)
 		if err != nil {
 			msgSkipped.WithLabelValues("decrypt_failed").Inc()
@@ -198,7 +209,7 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			continue
 		}
 
-		stored, err := r.store.StoreInboundMessage(ctx, InboundMessageRecord{
+		_, err = r.store.StoreInboundMessage(ctx, InboundMessageRecord{
 			ID:            "in:" + msg.MsgID,
 			TenantID:      r.cfg.WeComCorpID,
 			RoomID:        roomID,
@@ -213,46 +224,56 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			return seq, fmt.Errorf("store inbound message for room %s: %w", roomID, err)
 		}
 
-		if !r.shouldProcessStoredMessage(&msg, text) {
+		if r.shouldProcessStoredMessage(&msg, text) {
+			msgCopy := msg
+			triggeredRooms[roomID] = &roomContext{msg: &msgCopy, sender: sender}
+		} else {
 			msgSkipped.WithLabelValues("no_trigger").Inc()
-			if err := r.store.SetCursor(ctx, wecomCursorSource, r.cfg.WeComCorpID, chatData.Seq); err != nil {
-				return seq, fmt.Errorf("set cursor in postgres: %w", err)
-			}
-			seq = chatData.Seq
-			continue
+		}
+	}
+
+	// Advance cursor once after all messages are ingested.
+	if seq > startSeq {
+		if err := r.store.SetCursor(ctx, wecomCursorSource, r.cfg.WeComCorpID, seq); err != nil {
+			return seq, fmt.Errorf("set cursor in postgres: %w", err)
+		}
+	}
+
+	// Phase 2: dispatch — one agent call per triggered room.
+	for roomID, rc := range triggeredRooms {
+		if ctx.Err() != nil {
+			return seq, ctx.Err()
 		}
 
 		pendingMessages, err := r.store.ListPendingInboundMessages(ctx, r.cfg.WeComCorpID, roomID)
 		if err != nil {
-			return seq, fmt.Errorf("list pending inbound messages for room %s: %w", roomID, err)
+			slog.Error("list pending inbound messages failed", "room_id", roomID, "err", err)
+			continue
 		}
 		if len(pendingMessages) == 0 {
-			slog.Info("skip duplicate already completed message", "msgid", msg.MsgID, "room_id", roomID, "stored", stored)
-			if err := r.store.SetCursor(ctx, wecomCursorSource, r.cfg.WeComCorpID, chatData.Seq); err != nil {
-				return seq, fmt.Errorf("set cursor in postgres: %w", err)
-			}
-			seq = chatData.Seq
 			continue
 		}
 
-		targetName, err := r.resolveRoutingTarget(ctx, &msg, sender)
+		targetName, err := r.resolveRoutingTarget(ctx, rc.msg, rc.sender)
 		if err != nil {
-			return seq, fmt.Errorf("resolve target for room %s: %w", roomID, err)
+			slog.Error("resolve routing target failed", "room_id", roomID, "err", err)
+			continue
 		}
 
 		query := formatInboundMessagesForAgent(pendingMessages)
 		sandboxStart := time.Now()
 		reply, err := r.orch.InvokeAgent(ctx, roomID, sandbox.AgentRequest{
 			Query:    query,
-			MsgID:    msg.MsgID,
+			MsgID:    rc.msg.MsgID,
 			RoomID:   roomID,
 			TenantID: r.cfg.WeComCorpID,
-			ChatType: chatTypeForRoom(msg.RoomID),
+			ChatType: chatTypeForRoom(rc.msg.RoomID),
 		})
 		sandboxDuration.Observe(time.Since(sandboxStart).Seconds())
 		if err != nil {
 			sandboxInvocations.WithLabelValues("error").Inc()
-			return seq, fmt.Errorf("invoke sandbox for room %s: %w", roomID, err)
+			slog.Error("invoke sandbox failed", "room_id", roomID, "err", err)
+			continue
 		}
 		sandboxInvocations.WithLabelValues("ok").Inc()
 		msgDispatched.Inc()
@@ -262,19 +283,16 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 			pendingIDs = append(pendingIDs, pending.ID)
 		}
 		if err := r.store.StoreOutboundMessage(ctx, pendingIDs, OutboundMessageRecord{
-			ID:         "out:" + msg.MsgID,
+			ID:         "out:" + rc.msg.MsgID,
 			TenantID:   r.cfg.WeComCorpID,
 			RoomID:     roomID,
 			Content:    reply.Stdout,
 			TargetName: targetName,
 			CreatedAt:  time.Now().UTC(),
 		}); err != nil {
-			return seq, fmt.Errorf("store outbound message for room %s: %w", roomID, err)
+			slog.Error("store outbound message failed", "room_id", roomID, "err", err)
+			continue
 		}
-		if err := r.store.SetCursor(ctx, wecomCursorSource, r.cfg.WeComCorpID, chatData.Seq); err != nil {
-			return seq, fmt.Errorf("set cursor in postgres: %w", err)
-		}
-		seq = chatData.Seq
 	}
 
 	return seq, nil
