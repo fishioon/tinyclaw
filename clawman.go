@@ -158,10 +158,9 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 
 	if len(chatDataList) == 0 {
 		slog.Info("pull completed", "pulled", 0, "dispatched", 0, "seq", seq)
-		return seq, nil
+	} else {
+		msgPulled.Add(float64(len(chatDataList)))
 	}
-
-	msgPulled.Add(float64(len(chatDataList)))
 
 	// Phase 1: ingest — decrypt, parse, store inbound, advance cursor.
 	triggeredRooms := map[string]*roomContext{}
