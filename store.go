@@ -257,6 +257,38 @@ func (s *Store) ListPendingInboundMessages(ctx context.Context, tenantID, roomID
 	return records, nil
 }
 
+func (s *Store) ListPendingRooms(ctx context.Context, tenantID string) ([]string, error) {
+	defer dbTimer("list_pending_rooms")()
+	rows, err := s.db.QueryContext(
+		ctx,
+		`
+		SELECT DISTINCT room_id
+		FROM messages
+		WHERE tenant_id = $1
+		  AND direction = 'inbound'
+		  AND status = 'received'
+		`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list pending rooms: %w", err)
+	}
+	defer rows.Close()
+
+	var rooms []string
+	for rows.Next() {
+		var roomID string
+		if err := rows.Scan(&roomID); err != nil {
+			return nil, fmt.Errorf("scan pending room: %w", err)
+		}
+		rooms = append(rooms, roomID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending rooms: %w", err)
+	}
+	return rooms, nil
+}
+
 func (s *Store) StoreOutboundMessage(ctx context.Context, inboundIDs []string, outbound OutboundMessageRecord) error {
 	defer dbTimer("store_outbound")()
 	if len(inboundIDs) == 0 {

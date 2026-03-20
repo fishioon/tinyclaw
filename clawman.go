@@ -239,7 +239,18 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 		}
 	}
 
-	// Phase 2: dispatch — one agent call per triggered room.
+	// Phase 2: dispatch — one agent call per room with pending messages.
+	// Include rooms from DB that may have been left pending by a previous failed dispatch.
+	pendingRooms, err := r.store.ListPendingRooms(ctx, r.cfg.WeComCorpID)
+	if err != nil {
+		slog.Error("list pending rooms failed", "err", err)
+	}
+	for _, roomID := range pendingRooms {
+		if _, ok := triggeredRooms[roomID]; !ok {
+			triggeredRooms[roomID] = nil
+		}
+	}
+
 	for roomID, rc := range triggeredRooms {
 		if ctx.Err() != nil {
 			return seq, ctx.Err()
@@ -252,6 +263,23 @@ func (r *Clawman) pullAndDispatch(ctx context.Context, seq, limit int64) (int64,
 		}
 		if len(pendingMessages) == 0 {
 			continue
+		}
+
+		// For rooms recovered from DB (no roomContext), derive info from the last pending message.
+		lastPending := pendingMessages[len(pendingMessages)-1]
+		if rc == nil {
+			originalRoomID := roomID
+			if roomID == lastPending.SenderID {
+				originalRoomID = ""
+			}
+			rc = &roomContext{
+				msg: &WeComMessage{
+					MsgID:  lastPending.PlatformMsgID,
+					From:   lastPending.SenderID,
+					RoomID: originalRoomID,
+				},
+				sender: &Identity{UserID: lastPending.SenderID, Name: lastPending.SenderName},
+			}
 		}
 
 		targetName, err := r.resolveRoutingTarget(ctx, rc.msg, rc.sender)
