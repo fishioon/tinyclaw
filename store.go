@@ -69,7 +69,7 @@ func OpenStore(ctx context.Context, dsn string) (*Store, error) {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
-	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, dbStartupTimeout)
 	defer cancel()
 	if err := db.PingContext(pingCtx); err != nil {
 		db.Close()

@@ -18,6 +18,17 @@ spec:
         app: clawman
     spec:
       serviceAccountName: clawman
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: region
+                    operator: In
+                    values:
+                      - bj
+                      - sz
+                      - sh
       containers:
         - name: clawman
           image: ghcr.io/fishioon/tinyclaw:latest

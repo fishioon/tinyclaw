@@ -13,6 +13,8 @@ import (
 	"tinyclaw/worktool"
 )
 
+const dbStartupTimeout = 10 * time.Second
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
@@ -25,7 +27,7 @@ func main() {
 		slog.Warn("WECOM_BOT_ID is empty; bot-sent direct messages will be ingested as room_id=<bot_id> and may create self-loop sandboxes")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), dbStartupTimeout)
 	store, err := OpenStore(ctx, cfg.DatabaseURL)
 	if err != nil {
 		cancel()
