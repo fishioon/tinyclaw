@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clawman
+  namespace: claw
+  annotations:
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: lehttp
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: claw.tiny.yun
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: clawman
+                port:
+                  number: 8081
+  tls:
+    - hosts:
+        - claw.tiny.yun
