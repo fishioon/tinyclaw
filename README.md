@@ -17,8 +17,8 @@ TinyClaw 当前已经切到官方 `agent-sandbox` 资源与通信模型：
 - `agent` 在 sandbox 内提供 `/healthz`、`/agent`、`/execute`、`/upload`、`/download`、`/list`、`/exists` 等官方风格 HTTP 接口，主输入已经切到结构化 `messages[]`。
 - 私聊消息直接进入 `pending`；群聊消息只有命中 `@` 提及或触发关键字时才进入 `pending`，未触发消息先以 `status=buffered` 保留，等后续触发消息一并带入上下文。
 - 冷启动且 `messages` 为空时，仅最近 10 分钟内的消息允许进入 `pending/buffered`；更早的 backlog 仍会落库，但统一写成 `status=ignored`。
-- 如果消息已写入 `messages(status=pending)`，但在后续 sandbox、WorkTool 回发或 `done` 更新阶段失败，消息不会丢失；dispatch worker 会持续复用这批 `pending` 消息重试。
-- 主服务新增一个轻量 control API，可把“发给指定企业微信联系人”的外发任务写入 PostgreSQL `wecom_send_jobs`，再由 Android 发送端主动 claim 并回传结果。
+- 如果消息已写入 `messages(status=pending)`，但在后续 sandbox 调用或 `jobs` 写入阶段失败，消息不会丢失；dispatch worker 会持续复用这批 `pending` 消息重试。
+- 主服务提供一个轻量 control API，dispatch 成功后把 agent reply 写入 PostgreSQL `jobs` outbox，再由 Android 发送端按 `client_id` 轮询拉取并发送。
 
 ## 当前消息流程
 1. ingest worker 从 `messages` 查询当前 `MAX(seq)`，以此作为 `GetChatData(seq, limit)` 的起点，当前固定 `limit=100`。
@@ -32,59 +32,24 @@ TinyClaw 当前已经切到官方 `agent-sandbox` 资源与通信模型：
 6. 触发处理时，`sandbox.Orchestrator` 按 `room_id` 查找或创建进程内 SDK client，并调用 `Open()` 保证 sandbox ready。
 7. Orchestrator 通过 SDK `Run()` 在 sandbox 内执行一个本机 `curl http://127.0.0.1:8888/agent`，把聚合后的 `messages[]/msgid/room_id/tenant_id/chat_type` 传给 agent runtime。
 8. agent runtime 用 `claude_agent_sdk` 执行；`SandboxTemplate` 当前通过 `CLAUDE_SYSTEM_PROMPT_APPEND` 注入系统提示词。
-9. 主服务拿到 agent reply 后，直接通过 WorkTool 回发企业微信。
-10. 只有当 WorkTool 回发成功后，主服务才会把本轮参与处理的 `messages` 标记为 `done`；如果发送失败或 `done` 更新失败，这批消息保持 `pending`，由后续 dispatch 重试。
+9. 主服务拿到 agent reply 后，把结果写入 `jobs` outbox。
+10. 只要 outbox 写入成功，主服务就会把本轮参与处理的 `messages` 标记为 `done`；Android 发送端后续通过 control API 拉取并发送文本。
 
-## Android 外发任务队列
+## Android 外发拉取
 
-TinyClaw 现在支持一个最小 outbox 队列，给 Android 无障碍发送端拉取：
+TinyClaw 现在提供一个最小 outbox 拉取接口，给 Android 无障碍发送端使用：
 
-- 写任务：`POST /api/wecom/send-jobs`
-- 领任务：`POST /api/wecom/send-jobs/claim`
-- 回结果：`POST /api/wecom/send-jobs/{id}/result`
-
-任务模型最小字段：
-
-```json
-{
-  "recipient_alias": "小金鱼",
-  "message": "你好呀"
-}
-```
-
-claim 请求最小字段：
-
-```json
-{
-  "device_id": "android-phone-01"
-}
-```
-
-result 请求最小字段：
-
-```json
-{
-  "device_id": "android-phone-01",
-  "status": "succeeded"
-}
-```
-
-失败回执示例：
-
-```json
-{
-  "device_id": "android-phone-01",
-  "status": "failed",
-  "error": "recipient alias is not configured on device"
-}
-```
+- `GET /api/wecom/jobs?seq=<last_seq>`
 
 说明：
 
 - 这是“手机主动轮询 TinyClaw”的 pull 模式，不是 TinyClaw 主动打到手机。
 - `recipient_alias` 由手机本地联系人配置解析，所以服务端不需要知道企业微信 UI 细节。
-- claim 使用 lease 机制；当前由 `SEND_JOB_LEASE_SECONDS` 控制，默认 300 秒。
-- 若设置了 `CONTROL_API_TOKEN`，所有 control API 请求都必须带 `Authorization: Bearer <token>`。
+- 每条 `jobs` 在写入时就已经绑定 `client_id`，App 只拉属于自己的消息。
+- App 使用 HTTP Basic 认证：
+  - username = `client_id`
+  - password = `client_secret`
+- 当客户端首次请求 `seq=0` 时，服务端只返回 `next_seq`，不返回历史消息。
 
 ## Agent Scaffold
 - `agent/`：独立的 TypeScript agent 子工程，当前提供：
@@ -105,7 +70,7 @@ result 请求最小字段：
 2. 官方控制面接口采用 `SandboxTemplate + SandboxClaim`，不再由业务侧直接创建 `Sandbox`。
 3. 官方通信接口采用 `sandbox-router + HTTP runtime`，不再让 sandbox 自拉 Redis ingress。
 4. sandbox 生命周期统一通过官方 Go SDK 管理；当前 SDK 不支持自定义确定性 claim 名称，因此 room 级复用先采用进程内 client cache。
-5. 主服务当前只保留最小 PostgreSQL 事实源：`messages`。
+5. 主服务当前只保留最小 PostgreSQL 事实源：`messages`、`jobs`、`wecom_app_clients`。
 6. 主服务当前按 `room_id` 维护进程内 sandbox session，并以 SDK `Open()` 作为 session 可调用条件。
 7. 不建设独立 `room registry` 表，暂不维护中心化 `last_seen_at`。
 8. 空闲策略先采用软休眠；硬休眠、warm pool 和自动销毁后置到后续阶段。
@@ -114,7 +79,7 @@ result 请求最小字段：
 - 为进程内 `ttlCache` 增加过期项回收，避免长生命周期进程中缓存键只增不减。
 - 为 room sandbox session cache 增加回收策略，避免历史 `room_id` 持续堆积。
 - 评估如何在官方 Go SDK 支持前恢复跨重启的 room -> sandbox 稳定复用。
-- 评估 direct send 模式下“发送成功但 `messages.done` 更新失败”带来的重复发送窗口，并决定是否需要补幂等或去重策略。
+- 评估“`jobs` 写入成功但 `messages.done` 更新失败”带来的重复出队窗口，并决定是否需要补幂等或去重策略。
 
 ## 项目目标
 构建云端 AI Agent Runtime，让企业员工可在企业微信私聊/群聊中与 agent 交互：
@@ -164,8 +129,7 @@ result 请求最小字段：
 - `SANDBOX_ROUTER_URL`
 - `SANDBOX_SERVER_PORT`
 - `CONTROL_API_ADDR`
-- `CONTROL_API_TOKEN`
-- `SEND_JOB_LEASE_SECONDS`
+- `WECOM_APP_CLIENT_ID`
 
 默认值：
 - `SANDBOX_NAMESPACE=claw`
@@ -173,7 +137,6 @@ result 请求最小字段：
 - `SANDBOX_ROUTER_URL=http://sandbox-router-svc.{namespace}.svc.cluster.local:8080`
 - `SANDBOX_SERVER_PORT=8888`
 - `CONTROL_API_ADDR=:8081`
-- `SEND_JOB_LEASE_SECONDS=300`
 - `WECOM_GROUP_TRIGGER_MENTIONS={WECOM_BOT_ID}`（若未显式配置）
 - `WECOM_GROUP_TRIGGER_KEYWORDS=`（默认空）
 
@@ -195,11 +158,11 @@ agent 运行时关键配置：
   - `WECOM_CORP_SECRET`
   - `WECOM_RSA_PRIVATE_KEY`
   - `WECOM_CONTACT_SECRET`
-  - `WORKTOOL_ROBOT_ID`
   - `ANTHROPIC_API_KEY`（供 sandbox template 内 agent 使用）
 - 需要在 GitHub 仓库 variables 中配置：
   - `WECOM_CORP_ID`
   - `WECOM_BOT_ID`
+  - `WECOM_APP_CLIENT_ID`
   - `ANTHROPIC_BASE_URL`
 - 可选覆盖的 GitHub variables：
   - `SANDBOX_TEMPLATE_NAME`

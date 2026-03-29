@@ -12,7 +12,7 @@ Current architecture:
 - `clawman` uses the official `agent-sandbox` Go SDK to open and reuse sandbox clients.
 - `clawman` invokes the sandbox through `sandbox-router` over HTTP.
 - The sandboxed `agent` exposes `/healthz`, `/agent`, `/execute`, and the standard file APIs.
-- All pulled archive items are persisted to PostgreSQL `messages`; after agent success, `clawman` sends replies directly through WorkTool and marks the corresponding messages `done`.
+- All pulled archive items are persisted to PostgreSQL `messages`; after agent success, `clawman` writes reply tasks into PostgreSQL `jobs`, and marks the corresponding messages `done` only after the enqueue succeeds.
 
 ## Build & Run
 
@@ -42,14 +42,15 @@ WeChat Work Finance SDK
   -> agent-sandbox Go SDK open
   -> sandbox-router
   -> agent HTTP runtime (/agent)
-  -> WorkTool / WeCom send
+  -> PostgreSQL jobs(seq/client_id/recipient_alias/message/max_seq)
+  -> Android WeCom sender app
 ```
 
 Key files:
 - `main.go` — main service entry point
 - `clawman.go` — ingress pull loop, WeCom metadata resolution, sandbox invocation
-- `sandbox/ensure.go` — official Go SDK room client manager + `/agent` bridge
-- `sandbox/router.go` — router HTTP client
+- `sandbox/orchestrator.go` — official Go SDK room client manager + `/agent` bridge
+- `sandbox/types.go` — sandbox request/response contracts
 - `agent/src/main.ts` — sandbox HTTP runtime entry
 - `agent/src/server.ts` — `/healthz`, `/agent`, `/execute`, `/upload`, `/download`, `/list`, `/exists`
 - `agent/src/runtime.ts` — echo / `claude_agent_sdk`
@@ -59,8 +60,10 @@ Key files:
 | Table | Purpose |
 |---------|---------|
 | `messages` | Inbound archive facts, status machine, and `seq` checkpoint source |
+| `jobs` | Outbound reply tasks polled by the Android sender app |
+| `wecom_app_clients` | Client credentials for the control API |
 
-Short-lived WeCom detail caching and ensure debounce are process-local in the current single-replica version.
+Short-lived WeCom detail caching and sandbox session reuse are process-local in the current single-replica version.
 
 ## Conventions
 

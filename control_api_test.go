@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,102 +10,145 @@ import (
 	"time"
 )
 
-type fakeSendJobStore struct {
-	enqueueFn func(context.Context, string, string) (SendJob, error)
-	claimFn   func(context.Context, string, time.Duration) (*SendJob, error)
-	finishFn  func(context.Context, string, string, string, string) (*SendJob, error)
+type fakeJobStore struct {
+	getMaxJobSeqFn     func(context.Context, string) (int64, error)
+	listJobsSinceSeqFn func(context.Context, string, int64, time.Time) ([]Job, error)
+	validateClientFn   func(context.Context, string, string) (bool, error)
 }
 
-func (f fakeSendJobStore) EnqueueSendJob(ctx context.Context, recipientAlias, message string) (SendJob, error) {
-	return f.enqueueFn(ctx, recipientAlias, message)
+func (f fakeJobStore) GetMaxJobSeq(ctx context.Context, clientID string) (int64, error) {
+	return f.getMaxJobSeqFn(ctx, clientID)
 }
 
-func (f fakeSendJobStore) ClaimNextSendJob(ctx context.Context, deviceID string, lease time.Duration) (*SendJob, error) {
-	return f.claimFn(ctx, deviceID, lease)
+func (f fakeJobStore) ListJobsSinceSeq(ctx context.Context, clientID string, afterSeq int64, cutoff time.Time) ([]Job, error) {
+	return f.listJobsSinceSeqFn(ctx, clientID, afterSeq, cutoff)
 }
 
-func (f fakeSendJobStore) FinishSendJob(ctx context.Context, jobID, deviceID, status, lastError string) (*SendJob, error) {
-	return f.finishFn(ctx, jobID, deviceID, status, lastError)
+func (f fakeJobStore) ValidateAppClient(ctx context.Context, clientID, clientSecret string) (bool, error) {
+	return f.validateClientFn(ctx, clientID, clientSecret)
 }
 
-func TestHandleSendJobsRequiresAuthWhenTokenConfigured(t *testing.T) {
+func TestHandleListJobsRequiresBasicAuth(t *testing.T) {
 	api := &controlAPI{
-		store: fakeSendJobStore{},
-		token: "secret",
-		lease: 5 * time.Minute,
+		store: fakeJobStore{
+			getMaxJobSeqFn: func(context.Context, string) (int64, error) { return 0, nil },
+			listJobsSinceSeqFn: func(context.Context, string, int64, time.Time) ([]Job, error) {
+				return nil, nil
+			},
+			validateClientFn: func(context.Context, string, string) (bool, error) { return false, nil },
+		},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/wecom/send-jobs", bytes.NewBufferString(`{"recipient_alias":"小金鱼","message":"你好呀"}`))
+	req := httptest.NewRequest(http.MethodGet, "/api/wecom/jobs?seq=0", nil)
 	rec := httptest.NewRecorder()
 
-	api.handleSendJobs(rec, req)
+	api.handleListJobs(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
 
-func TestHandleSendJobsEnqueuesJob(t *testing.T) {
-	now := time.Now().UTC()
+func TestHandleListJobsBootstrapReturnsEmptyAndMaxSeq(t *testing.T) {
 	api := &controlAPI{
-		store: fakeSendJobStore{
-			enqueueFn: func(_ context.Context, recipientAlias, message string) (SendJob, error) {
-				return SendJob{
-					ID:             "job-1",
-					RecipientAlias: recipientAlias,
-					Message:        message,
-					Status:         sendJobStatusQueued,
-					CreatedAt:      now,
-					UpdatedAt:      now,
-				}, nil
+		store: fakeJobStore{
+			getMaxJobSeqFn: func(_ context.Context, clientID string) (int64, error) {
+				if clientID != "phone-a" {
+					t.Fatalf("clientID = %q, want phone-a", clientID)
+				}
+				return 42, nil
+			},
+			listJobsSinceSeqFn: func(context.Context, string, int64, time.Time) ([]Job, error) {
+				t.Fatal("listJobsSinceSeq should not be called during bootstrap")
+				return nil, nil
+			},
+			validateClientFn: func(_ context.Context, clientID, clientSecret string) (bool, error) {
+				return clientID == "phone-a" && clientSecret == "secret", nil
 			},
 		},
-		token: "",
-		lease: 5 * time.Minute,
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/wecom/send-jobs", bytes.NewBufferString(`{"recipient_alias":"小金鱼","message":"你好呀"}`))
+	req := httptest.NewRequest(http.MethodGet, "/api/wecom/jobs?seq=0", nil)
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("phone-a:secret")))
 	rec := httptest.NewRecorder()
 
-	api.handleSendJobs(rec, req)
+	api.handleListJobs(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	var payload struct {
-		Job sendJobResponse `json:"job"`
-	}
+	var payload jobsPageResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Job.ID != "job-1" || payload.Job.RecipientAlias != "小金鱼" || payload.Job.Message != "你好呀" {
-		t.Fatalf("unexpected job response: %+v", payload.Job)
+	if len(payload.Jobs) != 0 {
+		t.Fatalf("jobs length = %d, want 0", len(payload.Jobs))
+	}
+	if payload.NextSeq != 42 {
+		t.Fatalf("next_seq = %d, want 42", payload.NextSeq)
 	}
 }
 
-func TestHandleClaimSendJobReturnsNoContentWhenQueueEmpty(t *testing.T) {
+func TestHandleListJobsReturnsFilteredJobs(t *testing.T) {
+	now := time.Now().UTC()
 	api := &controlAPI{
-		store: fakeSendJobStore{
-			claimFn: func(_ context.Context, deviceID string, lease time.Duration) (*SendJob, error) {
-				if deviceID != "phone-01" {
-					t.Fatalf("deviceID = %q, want phone-01", deviceID)
+		store: fakeJobStore{
+			getMaxJobSeqFn: func(_ context.Context, clientID string) (int64, error) {
+				if clientID != "phone-a" {
+					t.Fatalf("clientID = %q, want phone-a", clientID)
 				}
-				if lease != 5*time.Minute {
-					t.Fatalf("lease = %s, want %s", lease, 5*time.Minute)
+				return 9, nil
+			},
+			listJobsSinceSeqFn: func(_ context.Context, clientID string, afterSeq int64, cutoff time.Time) ([]Job, error) {
+				if clientID != "phone-a" {
+					t.Fatalf("clientID = %q, want phone-a", clientID)
 				}
-				return nil, nil
+				if afterSeq != 4 {
+					t.Fatalf("afterSeq = %d, want 4", afterSeq)
+				}
+				if cutoff.After(now) {
+					t.Fatalf("cutoff should not be in the future")
+				}
+				return []Job{
+					{
+						ID:             "job-1",
+						Seq:            7,
+						ClientID:       "phone-a",
+						RecipientAlias: "小金鱼",
+						Message:        "你好呀",
+						MaxSeq:         8721,
+						CreatedAt:      now,
+					},
+				}, nil
+			},
+			validateClientFn: func(_ context.Context, clientID, clientSecret string) (bool, error) {
+				return clientID == "phone-a" && clientSecret == "secret", nil
 			},
 		},
-		lease: 5 * time.Minute,
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/wecom/send-jobs/claim", bytes.NewBufferString(`{"device_id":"phone-01"}`))
+	req := httptest.NewRequest(http.MethodGet, "/api/wecom/jobs?seq=4", nil)
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("phone-a:secret")))
 	rec := httptest.NewRecorder()
 
-	api.handleClaimSendJob(rec, req)
+	api.handleListJobs(rec, req)
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var payload jobsPageResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.NextSeq != 9 {
+		t.Fatalf("next_seq = %d, want 9", payload.NextSeq)
+	}
+	if len(payload.Jobs) != 1 {
+		t.Fatalf("jobs length = %d, want 1", len(payload.Jobs))
+	}
+	if payload.Jobs[0].ID != "job-1" || payload.Jobs[0].Seq != 7 || payload.Jobs[0].MaxSeq != 8721 {
+		t.Fatalf("unexpected job: %+v", payload.Jobs[0])
 	}
 }

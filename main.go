@@ -10,7 +10,6 @@ import (
 
 	"k8s.io/client-go/rest"
 	"tinyclaw/sandbox"
-	"tinyclaw/worktool"
 )
 
 const dbStartupTimeout = 10 * time.Second
@@ -64,15 +63,7 @@ func main() {
 		"server_port", cfg.SandboxServerPort,
 	)
 
-	// Create WorkTool client for direct reply delivery.
-	var replyClient *worktool.Client
-	if cfg.WorkToolRobotID != "" {
-		replyClient = worktool.NewClient(cfg.WorkToolRobotID)
-	} else {
-		slog.Warn("WORKTOOL_ROBOT_ID is empty; agent replies will remain pending until outbound delivery is configured")
-	}
-
-	clawman, err := NewClawman(cfg, store, orch, replyClient)
+	clawman, err := NewClawman(cfg, store, orch)
 	if err != nil {
 		slog.Error("init clawman failed", "err", err)
 		os.Exit(1)

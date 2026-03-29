@@ -6,11 +6,11 @@ metadata:
 data:
   WECOM_CORP_ID: "replace-me"
   WECOM_BOT_ID: "moss"
+  WECOM_APP_CLIENT_ID: "android-primary"
   WECOM_GROUP_TRIGGER_MENTIONS: "moss,私云助理,私云虾虾"
   WECOM_GROUP_TRIGGER_KEYWORDS: "虾虾,小助理"
   SANDBOX_TEMPLATE_NAME: "tinyclaw-agent-template"
   SANDBOX_ROUTER_URL: "http://sandbox-router-svc.claw.svc.cluster.local:8080"
   SANDBOX_SERVER_PORT: "8888"
   CONTROL_API_ADDR: ":8081"
-  SEND_JOB_LEASE_SECONDS: "300"
   ANTHROPIC_BASE_URL: "https://api.anthropic.com"

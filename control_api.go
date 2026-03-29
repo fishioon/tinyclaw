@@ -6,66 +6,44 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
 
-type sendJobStore interface {
-	EnqueueSendJob(ctx context.Context, recipientAlias, message string) (SendJob, error)
-	ClaimNextSendJob(ctx context.Context, deviceID string, lease time.Duration) (*SendJob, error)
-	FinishSendJob(ctx context.Context, jobID, deviceID, status, lastError string) (*SendJob, error)
+const jobRetentionWindow = 10 * time.Minute
+
+type jobStore interface {
+	GetMaxJobSeq(ctx context.Context, clientID string) (int64, error)
+	ListJobsSinceSeq(ctx context.Context, clientID string, afterSeq int64, cutoff time.Time) ([]Job, error)
+	ValidateAppClient(ctx context.Context, clientID, clientSecret string) (bool, error)
 }
 
 type controlAPI struct {
-	store sendJobStore
-	token string
-	lease time.Duration
+	store jobStore
 }
 
-type enqueueSendJobRequest struct {
+type jobResponse struct {
+	ID             string `json:"id"`
+	Seq            int64  `json:"seq"`
 	RecipientAlias string `json:"recipient_alias"`
 	Message        string `json:"message"`
+	MaxSeq         int64  `json:"max_seq"`
 }
 
-type claimSendJobRequest struct {
-	DeviceID string `json:"device_id"`
-}
-
-type finishSendJobRequest struct {
-	DeviceID string `json:"device_id"`
-	Status   string `json:"status"`
-	Error    string `json:"error"`
-}
-
-type sendJobResponse struct {
-	ID             string     `json:"id"`
-	RecipientAlias string     `json:"recipient_alias"`
-	Message        string     `json:"message"`
-	Status         string     `json:"status"`
-	DeviceID       string     `json:"device_id,omitempty"`
-	Attempts       int        `json:"attempts"`
-	LastError      string     `json:"last_error,omitempty"`
-	ClaimDeadline  *time.Time `json:"claim_deadline,omitempty"`
-	ClaimedAt      *time.Time `json:"claimed_at,omitempty"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+type jobsPageResponse struct {
+	Jobs    []jobResponse `json:"jobs"`
+	NextSeq int64         `json:"next_seq"`
 }
 
 func serveControlAPI(ctx context.Context, cfg Config, store *Store) {
-	api := &controlAPI{
-		store: store,
-		token: strings.TrimSpace(cfg.ControlAPIToken),
-		lease: time.Duration(cfg.SendJobLeaseSeconds) * time.Second,
-	}
+	api := &controlAPI{store: store}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeAPIJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("/api/wecom/send-jobs", api.handleSendJobs)
-	mux.HandleFunc("/api/wecom/send-jobs/claim", api.handleClaimSendJob)
-	mux.HandleFunc("/api/wecom/send-jobs/", api.handleSendJobResult)
+	mux.HandleFunc("/api/wecom/jobs", api.handleListJobs)
 
 	srv := &http.Server{
 		Addr:              cfg.ControlAPIAddr,
@@ -80,150 +58,94 @@ func serveControlAPI(ctx context.Context, cfg Config, store *Store) {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	if api.token == "" {
-		slog.Warn("control api token is empty; control api is unauthenticated", "addr", cfg.ControlAPIAddr)
-	}
-	slog.Info("control api starting", "addr", cfg.ControlAPIAddr, "lease_seconds", int(api.lease.Seconds()))
+	slog.Info("control api starting", "addr", cfg.ControlAPIAddr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("control api failed", "err", err)
 	}
 }
 
-func (api *controlAPI) handleSendJobs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use POST")
-		return
-	}
-	if !api.authorize(r) {
-		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+func (api *controlAPI) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use GET")
 		return
 	}
 
-	var req enqueueSendJobRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error())
-		return
-	}
-	req.RecipientAlias = strings.TrimSpace(req.RecipientAlias)
-	req.Message = strings.TrimSpace(req.Message)
-	if req.RecipientAlias == "" || req.Message == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "recipient_alias and message are required")
-		return
-	}
-
-	job, err := api.store.EnqueueSendJob(r.Context(), req.RecipientAlias, req.Message)
+	clientID, ok, err := api.authenticateClient(r)
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "enqueue_failed", err.Error())
+		writeAPIError(w, http.StatusInternalServerError, "auth_failed", err.Error())
 		return
 	}
-	writeAPIJSON(w, http.StatusCreated, map[string]any{"job": toSendJobResponse(job)})
-}
-
-func (api *controlAPI) handleClaimSendJob(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use POST")
-		return
-	}
-	if !api.authorize(r) {
-		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+	if !ok {
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid client credentials")
 		return
 	}
 
-	var req claimSendJobRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error())
-		return
+	rawSeq := strings.TrimSpace(r.URL.Query().Get("seq"))
+	if rawSeq == "" {
+		rawSeq = "0"
 	}
-	req.DeviceID = strings.TrimSpace(req.DeviceID)
-	if req.DeviceID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "device_id is required")
+	afterSeq, err := strconv.ParseInt(rawSeq, 10, 64)
+	if err != nil || afterSeq < 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "seq must be a non-negative integer")
 		return
 	}
 
-	job, err := api.store.ClaimNextSendJob(r.Context(), req.DeviceID, api.lease)
+	maxSeq, err := api.store.GetMaxJobSeq(r.Context(), clientID)
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "claim_failed", err.Error())
-		return
-	}
-	if job == nil {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	writeAPIJSON(w, http.StatusOK, map[string]any{"job": toSendJobResponse(*job)})
-}
-
-func (api *controlAPI) handleSendJobResult(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use POST")
-		return
-	}
-	if !api.authorize(r) {
-		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+		writeAPIError(w, http.StatusInternalServerError, "list_failed", err.Error())
 		return
 	}
 
-	jobID := strings.TrimPrefix(r.URL.Path, "/api/wecom/send-jobs/")
-	if !strings.HasSuffix(jobID, "/result") {
-		writeAPIError(w, http.StatusNotFound, "not_found", "unknown path")
-		return
-	}
-	jobID = strings.TrimSuffix(jobID, "/result")
-	jobID = strings.Trim(jobID, "/")
-	if jobID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "job id is required")
+	if afterSeq == 0 {
+		writeAPIJSON(w, http.StatusOK, jobsPageResponse{
+			Jobs:    []jobResponse{},
+			NextSeq: maxSeq,
+		})
 		return
 	}
 
-	var req finishSendJobRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error())
-		return
-	}
-	req.DeviceID = strings.TrimSpace(req.DeviceID)
-	req.Status = strings.TrimSpace(req.Status)
-	req.Error = strings.TrimSpace(req.Error)
-	if req.DeviceID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "device_id is required")
-		return
-	}
-	if req.Status != sendJobStatusSucceeded && req.Status != sendJobStatusFailed {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "status must be succeeded or failed")
-		return
-	}
-	if req.Status == sendJobStatusFailed && req.Error == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "error is required when status=failed")
-		return
-	}
-
-	job, err := api.store.FinishSendJob(r.Context(), jobID, req.DeviceID, req.Status, req.Error)
+	jobs, err := api.store.ListJobsSinceSeq(r.Context(), clientID, afterSeq, time.Now().UTC().Add(-jobRetentionWindow))
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "finish_failed", err.Error())
+		writeAPIError(w, http.StatusInternalServerError, "list_failed", err.Error())
 		return
 	}
-	if job == nil {
-		writeAPIError(w, http.StatusConflict, "claim_conflict", "job is not currently claimed by this device")
-		return
+
+	nextSeq := afterSeq
+	if maxSeq > nextSeq {
+		nextSeq = maxSeq
 	}
-	writeAPIJSON(w, http.StatusOK, map[string]any{"job": toSendJobResponse(*job)})
+
+	responseJobs := make([]jobResponse, 0, len(jobs))
+	for _, job := range jobs {
+		responseJobs = append(responseJobs, jobResponse{
+			ID:             job.ID,
+			Seq:            job.Seq,
+			RecipientAlias: job.RecipientAlias,
+			Message:        job.Message,
+			MaxSeq:         job.MaxSeq,
+		})
+	}
+
+	writeAPIJSON(w, http.StatusOK, jobsPageResponse{
+		Jobs:    responseJobs,
+		NextSeq: nextSeq,
+	})
 }
 
-func (api *controlAPI) authorize(r *http.Request) bool {
-	if api.token == "" {
-		return true
+func (api *controlAPI) authenticateClient(r *http.Request) (string, bool, error) {
+	clientID, clientSecret, ok := r.BasicAuth()
+	if !ok {
+		return "", false, nil
 	}
-	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-	const prefix = "Bearer "
-	if !strings.HasPrefix(authHeader, prefix) {
-		return false
-	}
-	return strings.TrimSpace(strings.TrimPrefix(authHeader, prefix)) == api.token
-}
 
-func decodeJSON(r *http.Request, target any) error {
-	defer r.Body.Close()
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	valid, err := api.store.ValidateAppClient(r.Context(), strings.TrimSpace(clientID), strings.TrimSpace(clientSecret))
+	if err != nil {
+		return "", false, err
+	}
+	if !valid {
+		return "", false, nil
+	}
+	return strings.TrimSpace(clientID), true, nil
 }
 
 func writeAPIJSON(w http.ResponseWriter, statusCode int, payload any) {
@@ -239,29 +161,4 @@ func writeAPIError(w http.ResponseWriter, statusCode int, code, detail string) {
 			"detail": detail,
 		},
 	})
-}
-
-func toSendJobResponse(job SendJob) sendJobResponse {
-	return sendJobResponse{
-		ID:             job.ID,
-		RecipientAlias: job.RecipientAlias,
-		Message:        job.Message,
-		Status:         job.Status,
-		DeviceID:       job.DeviceID,
-		Attempts:       job.Attempts,
-		LastError:      job.LastError,
-		ClaimDeadline:  optionalTime(job.ClaimDeadline),
-		ClaimedAt:      optionalTime(job.ClaimedAt),
-		CompletedAt:    optionalTime(job.CompletedAt),
-		CreatedAt:      job.CreatedAt,
-		UpdatedAt:      job.UpdatedAt,
-	}
-}
-
-func optionalTime(value time.Time) *time.Time {
-	if value.IsZero() || value.Equal(time.Unix(0, 0).UTC()) {
-		return nil
-	}
-	ts := value.UTC()
-	return &ts
 }

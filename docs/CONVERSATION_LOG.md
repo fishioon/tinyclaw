@@ -117,3 +117,15 @@ agent启动后就去从redis队列中拉取对应的消息，开始消费。
 4. 只有当 WorkTool 回发成功后，对应 `messages` 才会从 `pending` 更新为 `done`。
 5. 如果 sandbox 调用失败、WorkTool 回发失败，或回发成功后 `done` 更新失败，当前消息都会继续保留在 `pending`，由后续 dispatch 重试。
 6. 该简化方案接受一个已知窗口：如果 WorkTool 已成功发送，但 `messages.done` 更新失败，后续重试可能产生重复回复；当前版本先接受这一权衡，以换取更直接的实现。
+
+---
+
+## 8. Android 拉取 jobs 出站链路（2026-03-29）
+
+### 变更结论
+1. 主服务不再在 dispatch 成功后直接调用 WorkTool；回复改为写入 PostgreSQL `jobs`。
+2. `jobs` 最小字段为：`id / seq / client_id / recipient_alias / message / max_seq / created_at`。
+3. Android 发送端改为调用 `GET /api/wecom/jobs?seq=<last_seq>` 拉取增量任务，不再使用 claim/result 双接口。
+4. control API 改为 HTTP Basic 认证；服务端通过 `wecom_app_clients(client_id, client_secret, enabled)` 校验客户端。
+5. 只要 `jobs` 写入成功，当前批次 `messages` 就会更新为 `done`；如果 `jobs` 写入失败，则该批消息继续保持 `pending`。
+6. 当前版本接受一个已知窗口：如果 `jobs` 已成功写入，但 `messages.done` 更新失败，后续 dispatch 可能重复写入同一回复任务。

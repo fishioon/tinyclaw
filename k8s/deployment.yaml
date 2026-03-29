@@ -33,6 +33,9 @@ spec:
         - name: clawman
           image: ghcr.io/fishioon/tinyclaw:latest
           imagePullPolicy: Always
+          ports:
+            - containerPort: 8081
+              name: control-api
           envFrom:
             - configMapRef:
                 name: tinyclaw-config

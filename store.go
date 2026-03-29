@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,11 +16,6 @@ const (
 	statusBuffered = "buffered"
 	statusPending  = "pending"
 	statusDone     = "done"
-
-	sendJobStatusQueued    = "queued"
-	sendJobStatusClaimed   = "claimed"
-	sendJobStatusSucceeded = "succeeded"
-	sendJobStatusFailed    = "failed"
 )
 
 type Store struct {
@@ -41,19 +35,14 @@ type MessageRecord struct {
 	CreatedAt time.Time
 }
 
-type SendJob struct {
+type Job struct {
 	ID             string
+	Seq            int64
+	ClientID       string
 	RecipientAlias string
 	Message        string
-	Status         string
-	DeviceID       string
-	Attempts       int
-	LastError      string
-	ClaimDeadline  time.Time
-	ClaimedAt      time.Time
-	CompletedAt    time.Time
+	MaxSeq         int64
 	CreatedAt      time.Time
-	UpdatedAt      time.Time
 }
 
 func OpenStore(ctx context.Context, dsn string) (*Store, error) {
@@ -113,29 +102,30 @@ func (s *Store) InitSchema(ctx context.Context) error {
 		WHERE status = 'pending'
 		`,
 		`
-		CREATE TABLE IF NOT EXISTS wecom_send_jobs (
+		CREATE TABLE IF NOT EXISTS jobs (
 			id TEXT PRIMARY KEY,
+			seq BIGSERIAL UNIQUE,
+			client_id TEXT NOT NULL,
 			recipient_alias TEXT NOT NULL,
 			message TEXT NOT NULL,
-			status TEXT NOT NULL,
-			device_id TEXT,
-			attempts INTEGER NOT NULL DEFAULT 0,
-			last_error TEXT,
-			claim_deadline TIMESTAMPTZ,
-			claimed_at TIMESTAMPTZ,
-			completed_at TIMESTAMPTZ,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			CHECK (status IN ('queued', 'claimed', 'succeeded', 'failed'))
+			max_seq BIGINT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
 		`,
 		`
-		CREATE INDEX IF NOT EXISTS idx_wecom_send_jobs_claimable
-		ON wecom_send_jobs (status, created_at)
+		CREATE INDEX IF NOT EXISTS idx_jobs_client_seq
+		ON jobs (client_id, seq)
 		`,
 		`
-		CREATE INDEX IF NOT EXISTS idx_wecom_send_jobs_claim_deadline
-		ON wecom_send_jobs (status, claim_deadline)
+		CREATE INDEX IF NOT EXISTS idx_jobs_client_created_at
+		ON jobs (client_id, created_at)
+		`,
+		`
+		CREATE TABLE IF NOT EXISTS wecom_app_clients (
+			client_id TEXT PRIMARY KEY,
+			client_secret TEXT NOT NULL,
+			enabled BOOLEAN NOT NULL DEFAULT TRUE
+		)
 		`,
 	}
 
@@ -375,190 +365,132 @@ func (s *Store) MarkMessagesDone(ctx context.Context, seqs []int64) error {
 	return nil
 }
 
-func (s *Store) EnqueueSendJob(ctx context.Context, recipientAlias, message string) (SendJob, error) {
-	defer dbTimer("enqueue_send_job")()
+func (s *Store) EnqueueJob(ctx context.Context, clientID, recipientAlias, message string, maxSeq int64) (Job, error) {
+	defer dbTimer("enqueue_job")()
 
-	now := time.Now().UTC()
-	job := SendJob{
+	job := Job{
 		ID:             uuid.NewString(),
+		ClientID:       clientID,
 		RecipientAlias: recipientAlias,
 		Message:        message,
-		Status:         sendJobStatusQueued,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		MaxSeq:         maxSeq,
+		CreatedAt:      time.Now().UTC(),
 	}
 
-	if _, err := s.db.ExecContext(
+	err := s.db.QueryRowContext(
 		ctx,
 		`
-		INSERT INTO wecom_send_jobs (
+		INSERT INTO jobs (
 			id,
+			client_id,
 			recipient_alias,
 			message,
-			status,
-			created_at,
-			updated_at
+			max_seq,
+			created_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING seq
 		`,
 		job.ID,
+		job.ClientID,
 		job.RecipientAlias,
 		job.Message,
-		job.Status,
+		job.MaxSeq,
 		job.CreatedAt,
-		job.UpdatedAt,
-	); err != nil {
-		return SendJob{}, fmt.Errorf("enqueue send job: %w", err)
+	).Scan(&job.Seq)
+	if err != nil {
+		return Job{}, fmt.Errorf("enqueue job: %w", err)
 	}
 
 	return job, nil
 }
 
-func (s *Store) ClaimNextSendJob(ctx context.Context, deviceID string, lease time.Duration) (*SendJob, error) {
-	defer dbTimer("claim_send_job")()
+func (s *Store) GetMaxJobSeq(ctx context.Context, clientID string) (int64, error) {
+	defer dbTimer("get_max_job_seq")()
 
-	if strings.TrimSpace(deviceID) == "" {
-		return nil, fmt.Errorf("claim send job: deviceID is empty")
-	}
-	if lease <= 0 {
-		return nil, fmt.Errorf("claim send job: lease must be positive")
-	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin claim tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	var job SendJob
-	err = tx.QueryRowContext(
+	var maxSeq sql.NullInt64
+	if err := s.db.QueryRowContext(
 		ctx,
 		`
-		WITH candidate AS (
-			SELECT id
-			FROM wecom_send_jobs
-			WHERE status = $1
-			   OR (status = $2 AND claim_deadline IS NOT NULL AND claim_deadline < NOW())
-			ORDER BY created_at
-			LIMIT 1
-			FOR UPDATE SKIP LOCKED
-		)
-		UPDATE wecom_send_jobs AS jobs
-		SET status = $2,
-			device_id = $3,
-			attempts = jobs.attempts + 1,
-			last_error = NULL,
-			claimed_at = NOW(),
-			claim_deadline = NOW() + ($4 * INTERVAL '1 second'),
-			updated_at = NOW()
-		FROM candidate
-		WHERE jobs.id = candidate.id
-		RETURNING
-			jobs.id,
-			jobs.recipient_alias,
-			jobs.message,
-			jobs.status,
-			COALESCE(jobs.device_id, ''),
-			jobs.attempts,
-			COALESCE(jobs.last_error, ''),
-			COALESCE(jobs.claim_deadline, TIMESTAMPTZ 'epoch'),
-			COALESCE(jobs.claimed_at, TIMESTAMPTZ 'epoch'),
-			COALESCE(jobs.completed_at, TIMESTAMPTZ 'epoch'),
-			jobs.created_at,
-			jobs.updated_at
+		SELECT MAX(seq)
+		FROM jobs
+		WHERE client_id = $1
 		`,
-		sendJobStatusQueued,
-		sendJobStatusClaimed,
-		deviceID,
-		int(lease.Seconds()),
-	).Scan(
-		&job.ID,
-		&job.RecipientAlias,
-		&job.Message,
-		&job.Status,
-		&job.DeviceID,
-		&job.Attempts,
-		&job.LastError,
-		&job.ClaimDeadline,
-		&job.ClaimedAt,
-		&job.CompletedAt,
-		&job.CreatedAt,
-		&job.UpdatedAt,
-	)
-	switch {
-	case err == nil:
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit claim tx: %w", err)
-		}
-		return &job, nil
-	case errors.Is(err, sql.ErrNoRows):
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("claim send job: %w", err)
+		clientID,
+	).Scan(&maxSeq); err != nil {
+		return 0, fmt.Errorf("get max job seq: %w", err)
 	}
+	if !maxSeq.Valid {
+		return 0, nil
+	}
+	return maxSeq.Int64, nil
 }
 
-func (s *Store) FinishSendJob(ctx context.Context, jobID, deviceID, status, lastError string) (*SendJob, error) {
-	defer dbTimer("finish_send_job")()
+func (s *Store) ListJobsSinceSeq(ctx context.Context, clientID string, afterSeq int64, cutoff time.Time) ([]Job, error) {
+	defer dbTimer("list_jobs_since_seq")()
 
-	if status != sendJobStatusSucceeded && status != sendJobStatusFailed {
-		return nil, fmt.Errorf("finish send job: invalid status %q", status)
-	}
-
-	var job SendJob
-	err := s.db.QueryRowContext(
+	rows, err := s.db.QueryContext(
 		ctx,
 		`
-		UPDATE wecom_send_jobs
-		SET status = $3,
-			last_error = NULLIF($4, ''),
-			claim_deadline = NULL,
-			completed_at = NOW(),
-			updated_at = NOW()
-		WHERE id = $1
-		  AND device_id = $2
-		  AND status = $5
-		RETURNING
-			id,
-			recipient_alias,
-			message,
-			status,
-			COALESCE(device_id, ''),
-			attempts,
-			COALESCE(last_error, ''),
-			COALESCE(claim_deadline, TIMESTAMPTZ 'epoch'),
-			COALESCE(claimed_at, TIMESTAMPTZ 'epoch'),
-			COALESCE(completed_at, TIMESTAMPTZ 'epoch'),
-			created_at,
-			updated_at
+		SELECT id, seq, client_id, recipient_alias, message, max_seq, created_at
+		FROM jobs
+		WHERE client_id = $1
+		  AND seq > $2
+		  AND created_at >= $3
+		ORDER BY seq ASC
 		`,
-		jobID,
-		deviceID,
-		status,
-		lastError,
-		sendJobStatusClaimed,
-	).Scan(
-		&job.ID,
-		&job.RecipientAlias,
-		&job.Message,
-		&job.Status,
-		&job.DeviceID,
-		&job.Attempts,
-		&job.LastError,
-		&job.ClaimDeadline,
-		&job.ClaimedAt,
-		&job.CompletedAt,
-		&job.CreatedAt,
-		&job.UpdatedAt,
+		clientID,
+		afterSeq,
+		cutoff,
 	)
-	switch {
-	case err == nil:
-		return &job, nil
-	case errors.Is(err, sql.ErrNoRows):
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("finish send job: %w", err)
+	if err != nil {
+		return nil, fmt.Errorf("list jobs since seq: %w", err)
 	}
+	defer rows.Close()
+
+	var jobs []Job
+	for rows.Next() {
+		var job Job
+		if err := rows.Scan(
+			&job.ID,
+			&job.Seq,
+			&job.ClientID,
+			&job.RecipientAlias,
+			&job.Message,
+			&job.MaxSeq,
+			&job.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan job: %w", err)
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate jobs: %w", err)
+	}
+	return jobs, nil
+}
+
+func (s *Store) ValidateAppClient(ctx context.Context, clientID, clientSecret string) (bool, error) {
+	defer dbTimer("validate_app_client")()
+
+	var exists bool
+	if err := s.db.QueryRowContext(
+		ctx,
+		`
+		SELECT EXISTS (
+			SELECT 1
+			FROM wecom_app_clients
+			WHERE client_id = $1
+			  AND client_secret = $2
+			  AND enabled = TRUE
+		)
+		`,
+		clientID,
+		clientSecret,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("validate app client: %w", err)
+	}
+	return exists, nil
 }
 
 func nullIfEmpty(value string) any {

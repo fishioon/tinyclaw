@@ -29,11 +29,9 @@ type Config struct {
 	SandboxServerPort      int
 	SandboxReadyTimeoutSec int
 
-	WorkToolRobotID string
+	WeComAppClientID string
 
-	ControlAPIAddr      string
-	ControlAPIToken     string
-	SendJobLeaseSeconds int
+	ControlAPIAddr string
 
 	MetricsAddr string
 }
@@ -64,11 +62,9 @@ func LoadConfig() (Config, error) {
 		SandboxServerPort:      parseIntEnv("SANDBOX_SERVER_PORT", 8888),
 		SandboxReadyTimeoutSec: parseIntEnv("SANDBOX_READY_TIMEOUT_SEC", 180),
 
-		WorkToolRobotID: os.Getenv("WORKTOOL_ROBOT_ID"),
+		WeComAppClientID: strings.TrimSpace(os.Getenv("WECOM_APP_CLIENT_ID")),
 
-		ControlAPIAddr:      envOrDefault("CONTROL_API_ADDR", ":8081"),
-		ControlAPIToken:     os.Getenv("CONTROL_API_TOKEN"),
-		SendJobLeaseSeconds: parseIntEnv("SEND_JOB_LEASE_SECONDS", 300),
+		ControlAPIAddr: envOrDefault("CONTROL_API_ADDR", ":8081"),
 
 		MetricsAddr: envOrDefault("METRICS_ADDR", ":9090"),
 	}
