@@ -31,6 +31,7 @@ const (
 	coldStartWindow            = 10 * time.Minute
 	dispatchRoomTimeout        = 6 * time.Minute
 	pendingDispatchWindow      = 10 * time.Minute
+	defaultWeComAppClientID    = "wecom_client_default_id"
 )
 
 var errFatalIngest = errors.New("fatal ingest error")
@@ -441,8 +442,9 @@ func partitionDispatchablePending(messages []MessageRecord, cutoff time.Time) ([
 }
 
 func (r *Clawman) enqueueJob(ctx context.Context, targetName, content string, maxSeq int64) error {
-	if strings.TrimSpace(r.cfg.WeComAppClientID) == "" {
-		return fmt.Errorf("wecom app client id is empty")
+	clientID := strings.TrimSpace(r.cfg.WeComAppClientID)
+	if clientID == "" {
+		clientID = defaultWeComAppClientID
 	}
 	if strings.TrimSpace(targetName) == "" {
 		return fmt.Errorf("reply target is empty")
@@ -451,7 +453,7 @@ func (r *Clawman) enqueueJob(ctx context.Context, targetName, content string, ma
 	if strings.TrimSpace(content) == "" {
 		return fmt.Errorf("reply content is empty")
 	}
-	_, err := r.store.EnqueueJob(ctx, r.cfg.WeComAppClientID, targetName, content, maxSeq)
+	_, err := r.store.EnqueueJob(ctx, clientID, targetName, content, maxSeq)
 	if err != nil {
 		return fmt.Errorf("enqueue job: %w", err)
 	}
