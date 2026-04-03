@@ -55,7 +55,7 @@ func LoadConfig() (Config, error) {
 		SandboxNamespace:       sandboxNamespace,
 		SandboxTemplateName:    envOrDefault("SANDBOX_TEMPLATE_NAME", defaultSandboxTemplate),
 		SandboxReadyTimeoutSec: parseIntEnv("SANDBOX_READY_TIMEOUT_SEC", 180),
-		SandboxWakePlaceholder: envOrDefault("SANDBOX_WAKE_PLACEHOLDER", defaultSandboxWakePlaceholder),
+		SandboxWakePlaceholder: parseSandboxWakePlaceholder(),
 
 		ControlAPIAddr:        envOrDefault("CONTROL_API_ADDR", ":8081"),
 		ClawmanGRPCListenAddr: envOrDefault("CLAWMAN_GRPC_LISTEN_ADDR", ":8092"),
@@ -84,6 +84,20 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func parseSandboxWakePlaceholder() string {
+	raw, ok := os.LookupEnv("SANDBOX_WAKE_PLACEHOLDER")
+	if !ok {
+		return defaultSandboxWakePlaceholder
+	}
+
+	value := strings.TrimSpace(raw)
+	switch strings.ToLower(value) {
+	case "0", "false", "no", "off":
+		return ""
+	}
+	return value
 }
 
 func parseListEnv(key string) []string {

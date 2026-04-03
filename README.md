@@ -168,6 +168,7 @@ TinyClaw 现在提供一个最小 outbox 拉取接口，给 Android 无障碍发
 - `SANDBOX_NAMESPACE=claw`
 - `SANDBOX_TEMPLATE_NAME=tinyclaw-agent-template`
 - `SANDBOX_WAKE_PLACEHOLDER=虾虾正在起床，请稍等一下下～`
+  关闭方式：显式设为 `off` / `false` / `0` / `no`
 - `CLAWMAN_GRPC_LISTEN_ADDR=:8092`
 - `CLAWMAN_GRPC_ADDR=clawman.{namespace}.svc.cluster.local:8092`
 - `CONTROL_API_ADDR=:8081`
