@@ -10,6 +10,7 @@ import type { AgentEnv, AgentRequest, ExecutionResult } from './types.js';
 const require = createRequire(import.meta.url);
 const runtimeDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(runtimeDir, '..');
+const logPreviewLimit = 200;
 
 export interface AgentRuntime {
   run(message: AgentRequest): Promise<ExecutionResult>;
@@ -45,7 +46,7 @@ function parsePayload(payload: string): unknown {
   }
 }
 
-function truncateForLog(value: string, limit = 100): string {
+function truncateForLog(value: string, limit = logPreviewLimit): string {
   const trimmed = value.trim();
   if (trimmed.length <= limit) {
     return trimmed;
@@ -61,7 +62,7 @@ function buildMessageSummary(message: AgentRequest): Array<Record<string, unknow
     from_name: item.fromName ?? '',
     msg_time: item.msgTime ?? '',
     payload_length: item.payload.length,
-    payload_preview: truncateForLog(item.payload, 100),
+    payload_preview: truncateForLog(item.payload, logPreviewLimit),
   }));
 }
 
@@ -198,7 +199,7 @@ export class ClaudeAgentSdkRuntime implements AgentRuntime {
         message_count: message.messages.length,
         messages: buildMessageSummary(message),
         prompt_length: prompt.length,
-        prompt_preview: truncateForLog(prompt, 100),
+        prompt_preview: truncateForLog(prompt, logPreviewLimit),
       }),
     );
 
