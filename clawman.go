@@ -391,12 +391,6 @@ func (r *Clawman) dispatchRoom(ctx context.Context, roomID string) {
 	dispatchCtx, cancel := context.WithTimeout(ctx, dispatchRoomTimeout)
 	defer cancel()
 
-	reply, err := r.invokeRoomAgent(dispatchCtx, roomID, rc.msg, recentMessages)
-	if err != nil {
-		slog.Error("invoke sandbox failed", "room_id", roomID, "err", err)
-		return
-	}
-
 	pendingSeqs := make([]int64, 0, len(recentMessages))
 	var maxSeq int64
 	for _, pending := range recentMessages {
@@ -404,6 +398,12 @@ func (r *Clawman) dispatchRoom(ctx context.Context, roomID string) {
 		if pending.Seq > maxSeq {
 			maxSeq = pending.Seq
 		}
+	}
+
+	reply, err := r.invokeRoomAgent(dispatchCtx, roomID, rc.msg, recentMessages, targetName, maxSeq)
+	if err != nil {
+		slog.Error("invoke sandbox failed", "room_id", roomID, "err", err)
+		return
 	}
 
 	if err := r.enqueueJob(ctx, targetName, reply, maxSeq); err != nil {
@@ -487,7 +487,14 @@ func (r *Clawman) buildRoomContext(ctx context.Context, roomID string, pendingMe
 	return rc, nil
 }
 
-func (r *Clawman) invokeRoomAgent(ctx context.Context, roomID string, msg *WeComMessage, pendingMessages []MessageRecord) (string, error) {
+func (r *Clawman) invokeRoomAgent(
+	ctx context.Context,
+	roomID string,
+	msg *WeComMessage,
+	pendingMessages []MessageRecord,
+	targetName string,
+	maxSeq int64,
+) (string, error) {
 	if r.orch == nil {
 		return "", fmt.Errorf("sandbox integration not configured")
 	}
@@ -496,10 +503,16 @@ func (r *Clawman) invokeRoomAgent(ctx context.Context, roomID string, msg *WeCom
 	}
 
 	sandboxStart := time.Now()
-	if _, err := r.orch.EnsureRoom(ctx, roomID); err != nil {
+	_, created, err := r.orch.EnsureRoom(ctx, roomID)
+	if err != nil {
 		sandboxDuration.Observe(time.Since(sandboxStart).Seconds())
 		sandboxInvocations.WithLabelValues("error").Inc()
 		return "", err
+	}
+	if created && r.cfg.SandboxWakePlaceholder != "" {
+		if placeholderErr := r.enqueueJob(ctx, targetName, r.cfg.SandboxWakePlaceholder, maxSeq); placeholderErr != nil {
+			slog.Warn("enqueue sandbox wake placeholder failed", "room_id", roomID, "target", targetName, "err", placeholderErr)
+		}
 	}
 
 	seqs := make([]int64, 0, len(pendingMessages))

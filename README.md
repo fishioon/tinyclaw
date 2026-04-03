@@ -158,6 +158,7 @@ TinyClaw 现在提供一个最小 outbox 拉取接口，给 Android 无障碍发
 - `WECOM_GROUP_TRIGGER_KEYWORDS`
 - `SANDBOX_NAMESPACE`
 - `SANDBOX_TEMPLATE_NAME`
+- `SANDBOX_WAKE_PLACEHOLDER`
 - `CLAWMAN_GRPC_LISTEN_ADDR`
 - `CLAWMAN_GRPC_ADDR`
 - `CONTROL_API_ADDR`
@@ -166,6 +167,7 @@ TinyClaw 现在提供一个最小 outbox 拉取接口，给 Android 无障碍发
 默认值：
 - `SANDBOX_NAMESPACE=claw`
 - `SANDBOX_TEMPLATE_NAME=tinyclaw-agent-template`
+- `SANDBOX_WAKE_PLACEHOLDER=虾虾正在起床，请稍等一下下～`
 - `CLAWMAN_GRPC_LISTEN_ADDR=:8092`
 - `CLAWMAN_GRPC_ADDR=clawman.{namespace}.svc.cluster.local:8092`
 - `CONTROL_API_ADDR=:8081`
@@ -197,5 +199,6 @@ agent 运行时关键配置：
   - `ANTHROPIC_BASE_URL`
 - 可选覆盖的 GitHub variables：
   - `SANDBOX_TEMPLATE_NAME`
+  - `SANDBOX_WAKE_PLACEHOLDER`
   - `CLAWMAN_GRPC_LISTEN_ADDR`
   - `CLAWMAN_GRPC_ADDR`

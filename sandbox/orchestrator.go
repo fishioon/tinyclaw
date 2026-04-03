@@ -80,20 +80,21 @@ func deterministicClaimName(roomID string) string {
 	return "tinyclaw-room-" + hex.EncodeToString(sum[:8])
 }
 
-func (o *Orchestrator) EnsureRoom(ctx context.Context, roomID string) (string, error) {
+func (o *Orchestrator) EnsureRoom(ctx context.Context, roomID string) (string, bool, error) {
 	if roomID == "" {
-		return "", fmt.Errorf("roomID is required")
+		return "", false, fmt.Errorf("roomID is required")
 	}
 	if o.cfg.TemplateName == "" {
-		return "", fmt.Errorf("sandbox template name is required")
+		return "", false, fmt.Errorf("sandbox template name is required")
 	}
 	if o.cfg.Namespace == "" {
-		return "", fmt.Errorf("sandbox namespace is required")
+		return "", false, fmt.Errorf("sandbox namespace is required")
 	}
 
 	session := o.getOrCreateRoomSession(roomID)
 	claimName := session.claimName
 	claims := o.client.SandboxClaims(o.cfg.Namespace)
+	created := false
 
 	if _, err := claims.Get(ctx, claimName, metav1.GetOptions{}); err != nil {
 		if _, err := claims.Create(ctx, &extensionsv1alpha1.SandboxClaim{
@@ -112,18 +113,20 @@ func (o *Orchestrator) EnsureRoom(ctx context.Context, roomID string) (string, e
 		}, metav1.CreateOptions{}); err != nil {
 			existing, getErr := claims.Get(ctx, claimName, metav1.GetOptions{})
 			if getErr != nil {
-				return "", fmt.Errorf("create sandbox claim for room %s: %w", roomID, err)
+				return "", false, fmt.Errorf("create sandbox claim for room %s: %w", roomID, err)
 			}
 			if existing.Annotations[roomIDAnnotationKey] != roomID {
-				return "", fmt.Errorf("claim %s already bound to another room", claimName)
+				return "", false, fmt.Errorf("claim %s already bound to another room", claimName)
 			}
+		} else {
+			created = true
 		}
 	}
 
 	if err := o.waitReady(ctx, claims, claimName); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return claimName, nil
+	return claimName, created, nil
 }
 
 func (o *Orchestrator) ResolveRoomID(ctx context.Context, sandboxID string) (string, error) {

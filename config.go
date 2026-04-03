@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	defaultSandboxNamespace = "claw"
-	defaultSandboxTemplate  = "tinyclaw-agent-template"
+	defaultSandboxNamespace       = "claw"
+	defaultSandboxTemplate        = "tinyclaw-agent-template"
+	defaultSandboxWakePlaceholder = "虾虾正在起床，请稍等一下下～"
 )
 
 type Config struct {
@@ -26,6 +27,7 @@ type Config struct {
 	SandboxNamespace       string
 	SandboxTemplateName    string
 	SandboxReadyTimeoutSec int
+	SandboxWakePlaceholder string
 
 	ControlAPIAddr        string
 	ClawmanGRPCListenAddr string
@@ -53,6 +55,7 @@ func LoadConfig() (Config, error) {
 		SandboxNamespace:       sandboxNamespace,
 		SandboxTemplateName:    envOrDefault("SANDBOX_TEMPLATE_NAME", defaultSandboxTemplate),
 		SandboxReadyTimeoutSec: parseIntEnv("SANDBOX_READY_TIMEOUT_SEC", 180),
+		SandboxWakePlaceholder: envOrDefault("SANDBOX_WAKE_PLACEHOLDER", defaultSandboxWakePlaceholder),
 
 		ControlAPIAddr:        envOrDefault("CONTROL_API_ADDR", ":8081"),
 		ClawmanGRPCListenAddr: envOrDefault("CLAWMAN_GRPC_LISTEN_ADDR", ":8092"),

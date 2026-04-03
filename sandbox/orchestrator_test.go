@@ -69,12 +69,15 @@ func TestEnsureRoomCreatesClaim(t *testing.T) {
 		rooms:  make(map[string]*roomSession),
 	}
 
-	claimName, err := orch.EnsureRoom(context.Background(), "room-1")
+	claimName, created, err := orch.EnsureRoom(context.Background(), "room-1")
 	if err != nil {
 		t.Fatalf("EnsureRoom error: %v", err)
 	}
 	if claimName == "" {
 		t.Fatal("claimName is empty")
+	}
+	if !created {
+		t.Fatal("created = false, want true")
 	}
 	got, err := claims.Get(context.Background(), claimName, metav1.GetOptions{})
 	if err != nil {
@@ -82,6 +85,45 @@ func TestEnsureRoomCreatesClaim(t *testing.T) {
 	}
 	if got.Annotations[roomIDAnnotationKey] != "room-1" {
 		t.Fatalf("room annotation = %q", got.Annotations[roomIDAnnotationKey])
+	}
+}
+
+func TestEnsureRoomReusesExistingClaim(t *testing.T) {
+	claims := newFakeClaimClient()
+	existingName := deterministicClaimName("room-1")
+	claims.claims[existingName] = &extensionsv1alpha1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: existingName,
+			Annotations: map[string]string{
+				roomIDAnnotationKey: "room-1",
+			},
+		},
+		Status: extensionsv1alpha1.SandboxClaimStatus{
+			Conditions: []metav1.Condition{{
+				Type:   "Ready",
+				Status: metav1.ConditionTrue,
+			}},
+		},
+	}
+	orch := &Orchestrator{
+		cfg: Config{
+			Namespace:    "claw",
+			TemplateName: "tinyclaw-agent-template",
+			ReadyTimeout: time.Second,
+		},
+		client: &fakeExtensions{claims: claims},
+		rooms:  make(map[string]*roomSession),
+	}
+
+	claimName, created, err := orch.EnsureRoom(context.Background(), "room-1")
+	if err != nil {
+		t.Fatalf("EnsureRoom error: %v", err)
+	}
+	if claimName != existingName {
+		t.Fatalf("claimName = %q, want %q", claimName, existingName)
+	}
+	if created {
+		t.Fatal("created = true, want false")
 	}
 }
 
