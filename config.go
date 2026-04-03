@@ -87,12 +87,10 @@ func envOrDefault(key, def string) string {
 }
 
 func parseSandboxWakePlaceholder() string {
-	raw, ok := os.LookupEnv("SANDBOX_WAKE_PLACEHOLDER")
-	if !ok {
+	value := os.Getenv("SANDBOX_WAKE_PLACEHOLDER")
+	if value == "" {
 		return defaultSandboxWakePlaceholder
 	}
-
-	value := strings.TrimSpace(raw)
 	switch strings.ToLower(value) {
 	case "0", "false", "no", "off":
 		return ""
